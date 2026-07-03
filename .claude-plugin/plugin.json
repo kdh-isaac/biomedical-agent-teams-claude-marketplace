@@ -1,0 +1,21 @@
+{
+  "name": "biomedical-agent-teams",
+  "version": "0.8.3",
+  "description": "Biomedical Agent Teams — Claude Code port of the BMAT router for life-science research workflows.",
+  "author": {
+    "name": "Donghyun Kim",
+    "url": "https://github.com/kdh-isaac"
+  },
+  "homepage": "https://github.com/kdh-isaac/biomedical-agent-teams-codex-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "biomedical",
+    "immunology",
+    "omics",
+    "CAR-T",
+    "scRNA-seq",
+    "evidence-audit",
+    "experiment-design",
+    "translational"
+  ]
+}

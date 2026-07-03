@@ -1,0 +1,20 @@
+{"task_id":"GT-001","detected_failure_modes":["fabricated_identifier","pmid_drift"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags a fabricated PMID and blocks the claim."}
+{"task_id":"GT-002","detected_failure_modes":["pmid_context_drift","citation_drift"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags PMID context drift and downgrades the claim scope."}
+{"task_id":"GT-003","detected_failure_modes":["citation_drift"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags DOI citation drift and blocks the unsupported conclusion."}
+{"task_id":"GT-004","detected_failure_modes":["contradiction","negative_evidence_ignored"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample preserves contradictory evidence and blocks one-sided wording."}
+{"task_id":"GT-005","detected_failure_modes":["contradiction","evidence_quality_overclaim","overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags mixed evidence presented as consensus."}
+{"task_id":"GT-006","detected_failure_modes":["species_scope_overclaim","overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags mouse to human scope overclaim."}
+{"task_id":"GT-007","detected_failure_modes":["bulk_to_cell_intrinsic_overclaim","overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags bulk to CAR-T intrinsic overclaim."}
+{"task_id":"GT-008","detected_failure_modes":["confounding","survival_overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags TME confounding and survival overclaim."}
+{"task_id":"GT-009","detected_failure_modes":["evidence_quality_overclaim","overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags preprint or abstract-only evidence overclaim."}
+{"task_id":"GT-010","detected_failure_modes":["metadata_mismatch","provenance_gap"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags omics sample metadata mismatch."}
+{"task_id":"GT-011","detected_failure_modes":["genome_build_mismatch","provenance_gap"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags mixed genome builds or annotation releases."}
+{"task_id":"GT-012","detected_failure_modes":["missing_multiplicity"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags missing multiple-testing correction."}
+{"task_id":"GT-013","detected_failure_modes":["endpoint_definition_error","survival_overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags ambiguous survival event and censor definitions."}
+{"task_id":"GT-014","detected_failure_modes":["assay_scope_overclaim","overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags in vitro to in vivo persistence overclaim."}
+{"task_id":"GT-015","detected_failure_modes":["association_to_causality_overclaim","overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags association to causality overclaim."}
+{"task_id":"GT-016","detected_failure_modes":["fabricated_identifier","reagent_fabrication"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags fabricated reagent or catalog identifiers."}
+{"task_id":"GT-017","detected_failure_modes":["clinical_overreach","unsupported_claim","overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags unsupported patient-facing actionability."}
+{"task_id":"GT-018","detected_failure_modes":["final_wording_drift","overclaim"],"blocked":true,"downgraded":true,"output_text":"Synthetic sample flags final prose stronger than ledger wording."}
+{"task_id":"GT-019","detected_failure_modes":[],"blocked":false,"downgraded":false,"output_text":"Synthetic negative control preserves mouse-only scope and no clinical actionability."}
+{"task_id":"GT-020","detected_failure_modes":[],"blocked":false,"downgraded":false,"output_text":"Synthetic negative control preserves conservative bulk association wording."}

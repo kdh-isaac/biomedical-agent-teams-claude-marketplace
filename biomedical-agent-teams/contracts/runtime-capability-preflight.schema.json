@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Biomedical Agent Teams Runtime Capability Preflight",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "runtime_id",
+    "runtime_client",
+    "plugin_version",
+    "workspace_root",
+    "capabilities",
+    "external_bio_tools_available",
+    "spawned_subagents_supported",
+    "sandbox_profile",
+    "downgrade_rule"
+  ],
+  "properties": {
+    "runtime_id": { "type": "string" },
+    "runtime_client": { "type": "string" },
+    "plugin_version": { "type": "string" },
+    "workspace_root": { "type": "string" },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "web_search_available",
+        "shell_available",
+        "file_read_available",
+        "file_write_available",
+        "network_available"
+      ],
+      "properties": {
+        "web_search_available": { "$ref": "#/$defs/availability" },
+        "shell_available": { "$ref": "#/$defs/availability" },
+        "file_read_available": { "$ref": "#/$defs/availability" },
+        "file_write_available": { "$ref": "#/$defs/availability" },
+        "network_available": { "$ref": "#/$defs/availability" }
+      }
+    },
+    "external_bio_tools_available": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/availability" }
+    },
+    "validator_cli_available": { "$ref": "#/$defs/availability" },
+    "validator_unavailable_reason": {
+      "type": "string",
+      "enum": [
+        "none",
+        "validator_unavailable_due_to_runtime",
+        "missing_bundle",
+        "missing_jsonschema",
+        "not-applicable"
+      ]
+    },
+    "spawned_subagents_supported": { "$ref": "#/$defs/availability" },
+    "sandbox_profile": { "type": "string" },
+    "label_ceiling_due_to_runtime": {
+      "type": "string",
+      "enum": [
+        "Full protocol followed",
+        "Contract-shaped artifact bundle",
+        "Compact standard workflow",
+        "Limited capability-downgraded workflow",
+        "Blocked"
+      ]
+    },
+    "downgrade_rule": { "type": "string" },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "availability": {
+      "type": "string",
+      "enum": ["yes", "no", "unknown", "not-applicable"]
+    }
+  }
+}

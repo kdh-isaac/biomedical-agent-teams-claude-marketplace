@@ -1,0 +1,27 @@
+{
+  "binding_id": "TB-FIXTURE-INVALID-UNBACKED-001",
+  "tool_registry": [
+    {
+      "tool_id": "skill.pydeseq2-differential-expression",
+      "capability": "bulk RNA-seq DEG",
+      "surface": "skill",
+      "output_kind": "table",
+      "downgrade_label": "plan-only"
+    }
+  ],
+  "tool_call_ledger": [
+    {
+      "call_id": "C1",
+      "tool_id": "skill.pydeseq2-differential-expression",
+      "status": "downgraded",
+      "downgrade_label": "plan-only",
+      "notes": "no code runtime",
+      "affected_claim_ids": [
+        "H-deg-1"
+      ]
+    }
+  ],
+  "tool_backed_claim_ids": [
+    "H-deg-1"
+  ]
+}

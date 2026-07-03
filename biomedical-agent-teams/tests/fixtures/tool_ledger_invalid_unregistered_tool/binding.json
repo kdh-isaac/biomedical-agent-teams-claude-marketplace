@@ -1,0 +1,26 @@
+{
+  "binding_id": "TB-FIXTURE-INVALID-UNREG-001",
+  "tool_registry": [
+    {
+      "tool_id": "skill.single-cell-rna-qc",
+      "capability": "single-cell RNA QC",
+      "surface": "skill",
+      "output_kind": "dataset_metadata",
+      "downgrade_label": "plan-only"
+    }
+  ],
+  "tool_call_ledger": [
+    {
+      "call_id": "C1",
+      "tool_id": "skill.pydeseq2-differential-expression",
+      "status": "success",
+      "output_ref": "artifact://deg/results.csv",
+      "affected_claim_ids": [
+        "H-deg-1"
+      ]
+    }
+  ],
+  "tool_backed_claim_ids": [
+    "H-deg-1"
+  ]
+}

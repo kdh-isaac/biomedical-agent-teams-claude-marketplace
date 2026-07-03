@@ -1,0 +1,50 @@
+{
+  "tournament_id": "T-budget-exceeded-001",
+  "context_lock": "source-scope locked: general biomedical hypothesis discovery",
+  "candidates": [
+    {
+      "hypothesis_id": "H1",
+      "hypothesis": "Candidate mechanism A",
+      "status": "active"
+    },
+    {
+      "hypothesis_id": "H2",
+      "hypothesis": "Candidate mechanism B",
+      "status": "active"
+    }
+  ],
+  "rounds": [
+    {
+      "round_id": "R1",
+      "round_type": "generation",
+      "output_summary": "16 hypotheses generated"
+    },
+    {
+      "round_id": "R4",
+      "round_type": "pairwise-debate",
+      "output_summary": "60 matches played (swiss_partial)"
+    }
+  ],
+  "final_ranking": [
+    {
+      "rank": 1,
+      "hypothesis_id": "H1",
+      "verdict": "top_candidate",
+      "rationale": "highest EIG under the matches played",
+      "elo_rating": 1560.0
+    },
+    {
+      "rank": 2,
+      "hypothesis_id": "H2",
+      "verdict": "runner_up",
+      "rationale": "close second",
+      "elo_rating": 1512.0
+    }
+  ],
+  "iteration_budget": 2,
+  "iterations_used": 5,
+  "max_candidates": 16,
+  "max_pairwise_matches": 60,
+  "stop_reason": "budget_exhausted",
+  "result_label": "budget_bounded"
+}

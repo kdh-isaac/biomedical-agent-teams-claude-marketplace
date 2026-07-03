@@ -1,0 +1,19 @@
+{
+  "agent_registry_count": 1,
+  "test_fixture_count": 17,
+  "upstream_suite": "biomedical-agent-teams-claude",
+  "golden_task_count": 20,
+  "template_count": 13,
+  "agent_count": 37,
+  "reference_count": 13,
+  "version": "0.8.3",
+  "adapter_version": "0.8.3",
+  "script_count": 9,
+  "eval_count": 2,
+  "claude_code_plugin": true,
+  "command_count": 6,
+  "contract_count": 14,
+  "entrypoint": "SKILL.md",
+  "loop_count": 4,
+  "name": "biomedical-agent-teams"
+}

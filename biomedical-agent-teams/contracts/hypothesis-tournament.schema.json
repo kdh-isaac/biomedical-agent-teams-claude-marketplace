@@ -1,0 +1,317 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Biomedical Agent Teams Hypothesis Tournament",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tournament_id",
+    "context_lock",
+    "candidates",
+    "rounds",
+    "final_ranking"
+  ],
+  "properties": {
+    "tournament_id": {
+      "type": "string"
+    },
+    "context_lock": {
+      "type": "string"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hypothesis_id",
+          "hypothesis",
+          "status"
+        ],
+        "properties": {
+          "hypothesis_id": {
+            "type": "string"
+          },
+          "hypothesis": {
+            "type": "string"
+          },
+          "cluster_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "merged",
+              "held",
+              "discarded",
+              "winner"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "elo_rating": {
+            "type": "number"
+          },
+          "matches_played": {
+            "type": "number",
+            "minimum": 0
+          },
+          "matches_won": {
+            "type": "number",
+            "minimum": 0
+          },
+          "first_seen_iteration": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "rounds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round_id",
+          "round_type",
+          "output_summary"
+        ],
+        "properties": {
+          "round_id": {
+            "type": "string"
+          },
+          "round_type": {
+            "type": "string",
+            "enum": [
+              "generation",
+              "clustering",
+              "novelty-filter",
+              "pairwise-debate",
+              "evolution",
+              "bayesian-ranking",
+              "red-team",
+              "kill-test-design",
+              "meta-review",
+              "convergence-check"
+            ]
+          },
+          "output_summary": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "final_ranking": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rank",
+          "hypothesis_id",
+          "verdict",
+          "rationale"
+        ],
+        "properties": {
+          "rank": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "hypothesis_id": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "expected_information_gain": {
+            "type": "string"
+          },
+          "elo_rating": {
+            "type": "number"
+          },
+          "matches_played": {
+            "type": "number",
+            "minimum": 0
+          },
+          "matches_won": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "iteration_budget": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "iterations_used": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stop_reason": {
+      "type": "string",
+      "enum": [
+        "top_k_stable",
+        "no_new_survivors",
+        "budget_exhausted",
+        "single_pass",
+        "audit_only"
+      ]
+    },
+    "meta_review": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "iteration",
+          "convergence_recommendation"
+        ],
+        "properties": {
+          "iteration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "recurring_weakness_patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "generation_guidance_for_next_round": {
+            "type": "string"
+          },
+          "top_k_stability": {
+            "type": "string"
+          },
+          "novel_survivors": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "budget_remaining": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "convergence_recommendation": {
+            "type": "string",
+            "enum": [
+              "stop",
+              "iterate"
+            ]
+          },
+          "research_overview": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "results_integration": {
+      "type": "array",
+      "description": "Optional (v0.7). Records of results folded back into the tournament via the semi-open results-integration loop.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "result_id",
+          "source_kind",
+          "effect"
+        ],
+        "properties": {
+          "result_id": {
+            "type": "string"
+          },
+          "source_kind": {
+            "type": "string",
+            "enum": [
+              "experimental_readout",
+              "dataset_reanalysis",
+              "new_publication",
+              "internal_analysis",
+              "reviewer_finding"
+            ]
+          },
+          "provenance": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "affected_hypothesis_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "affected_claim_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "effect": {
+            "type": "string",
+            "enum": [
+              "confirms",
+              "refutes",
+              "refines",
+              "inconclusive"
+            ]
+          },
+          "ranking_delta": {
+            "type": "string"
+          },
+          "next_action": {
+            "type": "string",
+            "enum": [
+              "resume_iteration",
+              "route_to_experiment_design",
+              "hold",
+              "close"
+            ]
+          },
+          "human_gate_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "not-required"
+            ]
+          },
+          "iteration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "max_pairwise_matches": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Budget ceiling on R4 head-to-head matches per iteration (see references/compute-budget-policy.md)."
+    },
+    "max_candidates": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Budget ceiling on hypotheses ranked per iteration after the novelty filter."
+    },
+    "result_label": {
+      "type": "string",
+      "enum": [
+        "converged",
+        "budget_bounded",
+        "single_pass",
+        "audit_only"
+      ],
+      "description": "Honesty label on the final ranking (see references/compute-budget-policy.md). MUST be 'budget_bounded' when stop_reason is 'budget_exhausted' — a budget-bounded result is never reported as converged."
+    }
+  }
+}

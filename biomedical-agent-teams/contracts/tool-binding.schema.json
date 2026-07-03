@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Biomedical Agent Teams Tool Binding and Execution Ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tool_registry",
+    "tool_call_ledger"
+  ],
+  "properties": {
+    "binding_id": {
+      "type": "string"
+    },
+    "context_lock": {
+      "type": "string"
+    },
+    "tool_registry": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool_id",
+          "capability",
+          "surface",
+          "output_kind"
+        ],
+        "properties": {
+          "tool_id": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string",
+            "enum": [
+              "mcp",
+              "skill",
+              "code",
+              "web"
+            ]
+          },
+          "invocation": {
+            "type": "string"
+          },
+          "output_kind": {
+            "type": "string",
+            "enum": [
+              "citation_set",
+              "record",
+              "dataset_metadata",
+              "statistic",
+              "figure",
+              "table",
+              "text",
+              "structured_json"
+            ]
+          },
+          "provenance_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "failure_modes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "downgrade_label": {
+            "type": "string",
+            "enum": [
+              "not-checked",
+              "plan-only",
+              "inline-only",
+              "partial",
+              "source-corpus-gap",
+              "validator_unavailable_due_to_runtime"
+            ]
+          },
+          "requires_human_gate": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "tool_call_ledger": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "call_id",
+          "tool_id",
+          "status"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string"
+          },
+          "tool_id": {
+            "type": "string"
+          },
+          "inputs_digest": {
+            "type": "string"
+          },
+          "output_ref": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure",
+              "downgraded",
+              "skipped"
+            ]
+          },
+          "downgrade_label": {
+            "type": "string",
+            "enum": [
+              "not-checked",
+              "plan-only",
+              "inline-only",
+              "partial",
+              "source-corpus-gap",
+              "validator_unavailable_due_to_runtime"
+            ]
+          },
+          "provenance": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "affected_claim_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "iteration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tool_backed_claim_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
