@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -67,12 +68,23 @@ def skill_root_for(root: Path) -> Path:
     raise AssertionError(f"could not resolve copied skill root from {root}")
 
 
+# BUGFIX: both helpers previously called subprocess.run() with no timeout.
+# Combined with the bmat_package_check.py root-resolution bug (see
+# resolve_skill_root), a bad or oversized --root could make the child
+# process run for a very long time (observed ~14s against a 50-plugin
+# sibling directory, and unboundedly worse for larger installs), and the
+# test would hang instead of failing with a clear diagnostic. A bounded
+# timeout turns that failure mode into a fast, readable test failure.
+SUBPROCESS_TIMEOUT_SECONDS = 30
+
+
 def run_package_check(root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(package_check_for(root)), "--root", str(root)],
         text=True,
         capture_output=True,
         check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS,
     )
 
 
@@ -87,13 +99,39 @@ def run_docs_list(root: Path) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
         check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS,
     )
 
 
 def copy_plugin(tmp_path: Path) -> Path:
+    # BUGFIX (two compounding issues):
+    #
+    # 1. This previously copied PLUGIN_ROOT (SKILL_ROOT.parent) into
+    #    `target`, on the assumption that PLUGIN_ROOT *is* the marketplace
+    #    repo whose content should land at <tmp>/biomedical-agent-teams/.
+    #    That only holds in a marketplace source checkout. In a standalone
+    #    deployment topology (e.g. Claude Code's .remote-plugins/<id>/
+    #    layout), PLUGIN_ROOT is a directory shared by dozens of unrelated
+    #    sibling plugins, so this copied thousands of unrelated files (and
+    #    tens of MB of unrelated binaries) on every call, and skill_root_for()
+    #    could never find SKILL.md in the result -- every test using this
+    #    helper failed with "could not resolve copied skill root". Copying
+    #    SKILL_ROOT itself is correct regardless of deployment topology and
+    #    is dramatically cheaper.
+    # 2. shutil.copytree() preserves source permission bits, so when the
+    #    plugin is mounted/installed read-only the copy is read-only too and
+    #    every test that mutates a file under `target` (prefix_utf8_bom,
+    #    write_text, etc.) fails with PermissionError. Reset permissions on
+    #    the copy so it behaves like a normal writable scratch tree.
     target = tmp_path / "biomedical-agent-teams"
     ignore = shutil.ignore_patterns("__pycache__", ".pytest_cache")
-    shutil.copytree(PLUGIN_ROOT, target, ignore=ignore)
+    shutil.copytree(SKILL_ROOT, target, ignore=ignore)
+    for path in target.rglob("*"):
+        if path.is_dir():
+            os.chmod(path, 0o755)
+        else:
+            os.chmod(path, 0o644)
+    os.chmod(target, 0o755)
     return target
 
 
@@ -110,7 +148,13 @@ def test_current_plugin_default_prompts_fit_claude_limit() -> None:
 
 
 def test_current_package_check_passes() -> None:
-    result = run_package_check(PLUGIN_ROOT)
+    # BUGFIX: was run_package_check(PLUGIN_ROOT). PLUGIN_ROOT (SKILL_ROOT.parent)
+    # is only a valid checker root inside a marketplace source checkout; in a
+    # standalone/installed deployment topology (e.g. Claude Code's
+    # .remote-plugins/<plugin-id>/ layout) it is a directory shared by many
+    # unrelated sibling plugins and never resolves. SKILL_ROOT is the one root
+    # that is always valid regardless of deployment topology.
+    result = run_package_check(SKILL_ROOT)
 
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -142,7 +186,8 @@ def test_package_check_accepts_standalone_installed_skill_root(tmp_path: Path) -
 def test_package_tools_accept_plugin_root_path_with_spaces(tmp_path: Path) -> None:
     plugin_root = tmp_path / "BMAT Plugin With Spaces"
     ignore = shutil.ignore_patterns("__pycache__", ".pytest_cache")
-    shutil.copytree(PLUGIN_ROOT, plugin_root, ignore=ignore)
+    # BUGFIX: was shutil.copytree(PLUGIN_ROOT, ...); see test_current_package_check_passes.
+    shutil.copytree(SKILL_ROOT, plugin_root, ignore=ignore)
 
     package_result = run_package_check(plugin_root)
     docs_result = run_docs_list(plugin_root)
@@ -211,7 +256,8 @@ def test_docs_list_accepts_utf8_bom_prefixed_command_frontmatter(tmp_path: Path)
 
 
 def test_docs_list_emits_posix_paths_for_cross_platform_inventory() -> None:
-    result = run_docs_list(PLUGIN_ROOT)
+    # BUGFIX: was run_docs_list(PLUGIN_ROOT); see test_current_package_check_passes.
+    result = run_docs_list(SKILL_ROOT)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "`commands/evidence-audit-team.md`" in result.stdout

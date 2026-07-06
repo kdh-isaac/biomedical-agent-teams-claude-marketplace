@@ -710,7 +710,20 @@ def main() -> int:
     args = parse_args()
     findings: list[Finding] = []
     skill_root = resolve_skill_root(args.root, findings)
-    if skill_root.exists():
+    # BUGFIX: previously this only checked skill_root.exists(), which is true
+    # even when resolve_skill_root() fell back to returning the raw --root
+    # argument unresolved (e.g. --root pointed at a large multi-plugin
+    # directory such as Claude Code's .remote-plugins/ layout with dozens of
+    # sibling plugins). That caused every downstream validator -- especially
+    # validate_no_bom_bytes()'s recursive skill_root.rglob("*") walk -- to
+    # scan the wrong, potentially huge directory tree instead of failing
+    # fast. Skip all downstream validation once SKILL_ROOT_NOT_FOUND has been
+    # recorded so an unresolved root reports immediately instead of paying
+    # for an expensive, unbounded scan of an unrelated directory tree.
+    skill_root_resolved = skill_root.exists() and not any(
+        finding.code == "SKILL_ROOT_NOT_FOUND" for finding in findings
+    )
+    if skill_root_resolved:
         validate_no_bom_bytes(skill_root, findings)
         version = validate_versions(skill_root, findings)
         validate_plugin_interface(skill_root, findings)

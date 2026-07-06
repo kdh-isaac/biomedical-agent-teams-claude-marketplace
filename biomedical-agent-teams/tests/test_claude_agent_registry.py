@@ -3,7 +3,28 @@
 import json
 from pathlib import Path
 
+import pytest
+
 SKILL_ROOT = Path(__file__).parent.parent
+
+
+def _find_marketplace_json(start: Path, max_levels: int = 3) -> Path | None:
+    """Search up to max_levels parent directories for .claude-plugin/marketplace.json.
+
+    Bounded (fixed max_levels, no globbing) on purpose: this must stay cheap
+    even when the plugin is deployed inside a large shared directory (e.g.
+    Claude Code's .remote-plugins/<plugin-id>/ layout with many sibling
+    plugins), unlike a full filesystem walk.
+    """
+    candidate = start
+    for _ in range(max_levels):
+        marketplace_json = candidate / ".claude-plugin" / "marketplace.json"
+        if marketplace_json.exists():
+            return marketplace_json
+        if candidate.parent == candidate:
+            break
+        candidate = candidate.parent
+    return None
 
 
 def test_no_toml_template_paths():
@@ -36,6 +57,24 @@ def test_no_codex_agents_directory():
 
 def test_claude_plugin_directory_exists():
     """Marketplace root and plugin source root must expose Claude metadata."""
-    marketplace_root = SKILL_ROOT.parent
-    assert (marketplace_root / ".claude-plugin" / "marketplace.json").exists()
+    # The plugin's own .claude-plugin/plugin.json must always be present
+    # regardless of deployment topology.
     assert (SKILL_ROOT / ".claude-plugin" / "plugin.json").exists()
+
+    # BUGFIX: this previously hardcoded SKILL_ROOT.parent as "the marketplace
+    # root" and asserted marketplace.json exists there unconditionally. That
+    # only holds when the plugin is checked out inside its own marketplace
+    # repo. It does not hold for a standalone/installed deployment topology
+    # such as Claude Code's .remote-plugins/<plugin-id>/ layout, where
+    # SKILL_ROOT.parent is a directory shared by many unrelated plugins and
+    # has no marketplace metadata at all -- so this test failed there even
+    # though the plugin itself was fully valid. Skip the marketplace-relative
+    # check when that topology isn't present instead of failing.
+    marketplace_json = _find_marketplace_json(SKILL_ROOT.parent)
+    if marketplace_json is None:
+        pytest.skip(
+            "no .claude-plugin/marketplace.json found near "
+            f"{SKILL_ROOT.parent} -- not a marketplace source checkout "
+            "topology (e.g. running from a standalone installed/deployed "
+            "plugin root); marketplace-relative check is not applicable"
+        )
