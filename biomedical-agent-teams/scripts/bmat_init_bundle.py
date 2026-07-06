@@ -369,13 +369,17 @@ def main() -> int:
     args = parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     payloads = build_payloads(args.workflow, args.mode, args.topic, args.out)
-    for filename in BUNDLE_FILES:
-        path = args.out / filename
-        payload = payloads[filename]
-        if isinstance(payload, str):
-            write_text(path, payload, args.force)
-        else:
-            write_json(path, payload, args.force)
+    try:
+        for filename in BUNDLE_FILES:
+            path = args.out / filename
+            payload = payloads[filename]
+            if isinstance(payload, str):
+                write_text(path, payload, args.force)
+            else:
+                write_json(path, payload, args.force)
+    except FileExistsError as exc:
+        print(f"ERROR BUNDLE_ALREADY_EXISTS: {exc}; re-run with --force to overwrite", file=sys.stderr)
+        return 2
     print(f"BMAT artifact scaffold created: {args.out.resolve()}")
     return 0
 

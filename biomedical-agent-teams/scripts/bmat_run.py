@@ -212,12 +212,15 @@ def main() -> int:
     args = parse_args()
     payloads = bmat_init_bundle.build_payloads(args.alias, args.mode, args.question, args.out)
     enrich_payloads(payloads, args)
-    write_payloads(payloads, args.out, args.force)
-
-    print(f"BMAT workflow bundle created: {args.out.resolve()}")
-    if args.export == "markdown":
-        reports = export_markdown_workbench(args.out, args.force)
-        print(f"BMAT markdown workbench exported: {reports.resolve()}")
+    try:
+        write_payloads(payloads, args.out, args.force)
+        print(f"BMAT workflow bundle created: {args.out.resolve()}")
+        if args.export == "markdown":
+            reports = export_markdown_workbench(args.out, args.force)
+            print(f"BMAT markdown workbench exported: {reports.resolve()}")
+    except FileExistsError as exc:
+        print(f"ERROR BUNDLE_ALREADY_EXISTS: {exc}; re-run with --force to overwrite", file=sys.stderr)
+        return 2
 
     status = 0
     if args.validate:
