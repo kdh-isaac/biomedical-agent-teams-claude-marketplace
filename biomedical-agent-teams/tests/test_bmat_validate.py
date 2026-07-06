@@ -75,7 +75,7 @@ def valid_results_integration_payload() -> dict[str, object]:
     return {
         "schema_version": "1.0",
         "integration_id": "RI-TEST-001",
-        "plugin_version": "1.0.0",
+        "plugin_version": "1.1.0",
         "source_corpus_lock": "locked",
         "tool_use_log": [
             {
@@ -372,16 +372,6 @@ def test_valid_bundle_passes() -> None:
     result = run_validator("valid_full_protocol_bundle")
     assert result.returncode == 0, combined_output(result)
     assert "ERROR" not in result.stdout
-    assert "LEGACY_BUNDLE_ARTIFACT_NAME" not in result.stdout
-
-
-def test_legacy_preflight_alias_passes_with_warning() -> None:
-    result = run_validator("valid_legacy_preflight_bundle")
-    output = combined_output(result)
-
-    assert result.returncode == 0, output
-    assert "LEGACY_BUNDLE_ARTIFACT_NAME" in output
-    assert PREFLIGHT_FILE in output
 
 
 def test_valid_bundle_accepts_utf8_bom_prefixed_artifacts(tmp_path: Path) -> None:
@@ -596,6 +586,28 @@ def test_audit_mode_requires_lead_decision_even_below_full_label(tmp_path: Path)
     assert "LEAD_DECISION_REQUIRED_FOR_MODE" in combined_output(result)
 
 
+def test_lead_decision_mode_rule_must_match_required_route(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["final_label"] = "Compact standard workflow"
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+    (bundle / "final.md").write_text("Final workflow label: Compact standard workflow\n", encoding="utf-8")
+
+    lead_decision_path = bundle / "lead_decision.json"
+    lead_decision = json.loads(lead_decision_path.read_text(encoding="utf-8"))
+    lead_decision["mode_rule"] = "deep_required"
+    lead_decision_path.write_text(json.dumps(lead_decision, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    output = combined_output(result)
+    assert result.returncode == 1
+    assert "LEAD_DECISION_MODE_RULE_MISMATCH" in output
+    assert "audit_required" in output
+
+
 def test_full_protocol_missing_canonical_preflight_fails(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
@@ -607,6 +619,20 @@ def test_full_protocol_missing_canonical_preflight_fails(tmp_path: Path) -> None
     assert result.returncode == 1
     assert "FULL_PROTOCOL_REQUIRES_PREFLIGHT" in output
     assert PREFLIGHT_FILE in output
+
+
+def test_preflight_json_alias_is_not_accepted(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
+    canonical = bundle / PREFLIGHT_FILE
+    (bundle / "preflight.json").write_text(canonical.read_text(encoding="utf-8"), encoding="utf-8")
+    canonical.unlink()
+
+    result = run_validator_path(bundle)
+
+    output = combined_output(result)
+    assert result.returncode == 1
+    assert "FULL_PROTOCOL_REQUIRES_PREFLIGHT" in output
 
 
 def test_require_label_enforces_full_protocol_even_without_declared_label(tmp_path: Path) -> None:

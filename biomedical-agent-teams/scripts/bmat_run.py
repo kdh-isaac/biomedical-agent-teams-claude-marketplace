@@ -25,6 +25,19 @@ WORKFLOWS_ROOT = SKILL_ROOT / "workflows"
 DOMAIN_PACKS_ROOT = SKILL_ROOT / "domain-packs"
 VALIDATOR = SKILL_ROOT / "scripts" / "bmat_validate.py"
 TOOL_LEDGER_CHECK = SKILL_ROOT / "scripts" / "bmat_tool_ledger_check.py"
+WORKBENCH_FILE_ORDER = (
+    "index.md",
+    "protocol-lock.md",
+    "runtime-capability-preflight.md",
+    "lead-decision.md",
+    "source-corpus.md",
+    "claim-ledger.md",
+    "results-integration.md",
+    "reviewer-objections.md",
+    "allowed-final-wording.md",
+    "downgrade-reasons.md",
+    "next-experiment-gates.md",
+)
 
 
 def available_domain_packs() -> tuple[str, ...]:
@@ -176,6 +189,11 @@ def export_markdown_workbench(bundle: Path, force: bool) -> Path:
     run_id = str(run_state.get("run_id", "bmat-run"))
     reports = bundle / "reports" / run_id
     reports.mkdir(parents=True, exist_ok=True)
+    artifact_links = "\n".join(
+        f"- [{Path(filename).stem.replace('-', ' ').title()}](./{filename})"
+        for filename in WORKBENCH_FILE_ORDER
+        if filename != "index.md"
+    )
     files = {
         "index.md": (
             "# BMAT Research Workbench\n\n"
@@ -183,7 +201,9 @@ def export_markdown_workbench(bundle: Path, force: bool) -> Path:
             f"- workflow_alias: `{run_state.get('alias', '')}`\n"
             f"- final_label: `{run_state.get('final_label', '')}`\n"
             f"- domain_pack: `{run_state.get('domain_pack', '')}`\n\n"
-            "Review the linked artifacts before upgrading final wording.\n"
+            "Review the linked artifacts before upgrading final wording.\n\n"
+            "## Artifacts\n\n"
+            f"{artifact_links}\n"
         ),
         "protocol-lock.md": markdown_from_json("Protocol Lock", bundle / "run_state.json"),
         "runtime-capability-preflight.md": markdown_from_json("Runtime Capability Preflight", bundle / "runtime_capability_preflight.json"),
@@ -202,6 +222,22 @@ def export_markdown_workbench(bundle: Path, force: bool) -> Path:
             raise FileExistsError(f"{path} exists; use --force to overwrite")
         path.write_text(text, encoding="utf-8")
     return reports
+
+
+def ordered_workbench_paths(reports: Path) -> list[Path]:
+    ordered = [reports / filename for filename in WORKBENCH_FILE_ORDER if (reports / filename).exists()]
+    ordered_names = set(WORKBENCH_FILE_ORDER)
+    extras = sorted(
+        path
+        for path in reports.glob("*.md")
+        if path.name not in ordered_names
+    )
+    return ordered + extras
+
+
+def combined_markdown_workbench(reports: Path) -> str:
+    parts = [path.read_text(encoding="utf-8").rstrip() for path in ordered_workbench_paths(reports)]
+    return "\n\n---\n\n".join(part for part in parts if part) + "\n"
 
 
 def run_check(command: list[str]) -> int:

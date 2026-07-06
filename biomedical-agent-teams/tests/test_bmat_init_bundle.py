@@ -13,6 +13,7 @@ from types import ModuleType
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 INIT_BUNDLE = SKILL_ROOT / "scripts" / "bmat_init_bundle.py"
 BMAT_RUN = SKILL_ROOT / "scripts" / "bmat_run.py"
+BMAT_EXPORT = SKILL_ROOT / "scripts" / "bmat_export_workbench.py"
 VALIDATOR = SKILL_ROOT / "scripts" / "bmat_validate.py"
 PREFLIGHT_FILE = "runtime_capability_preflight.json"
 UTF8_BOM_BYTES = b"\xef\xbb\xbf"
@@ -33,11 +34,11 @@ def test_plugin_version_accepts_utf8_bom_prefixed_version_file(tmp_path: Path) -
     scripts.mkdir(parents=True)
     script_copy = scripts / "bmat_init_bundle.py"
     shutil.copy2(INIT_BUNDLE, script_copy)
-    (skill_root / "VERSION").write_bytes(UTF8_BOM_BYTES + b"1.0.0\n")
+    (skill_root / "VERSION").write_bytes(UTF8_BOM_BYTES + b"1.1.0\n")
 
     module = load_init_bundle_module(script_copy)
 
-    assert module.plugin_version() == "1.0.0"
+    assert module.plugin_version() == "1.1.0"
 
 
 def test_shell_family_detects_windows_powershell_from_comspec(monkeypatch) -> None:
@@ -79,7 +80,7 @@ def test_omics_run_scaffold_validates_with_explicit_reviewer_downgrade(tmp_path:
     lead_decision = json.loads((bundle / "lead_decision.json").read_text(encoding="utf-8"))
     assert preflight["runtime_id"] == preflight["runtime_capability_preflight_id"]
     assert preflight["runtime_client"] == "claude-code"
-    assert preflight["plugin_version"] == "1.0.0"
+    assert preflight["plugin_version"] == "1.1.0"
     assert preflight["python_invocation"]
     assert preflight["capabilities"]["shell_available"] == "yes"
     assert preflight["validator_cli_available"] == "yes"
@@ -175,6 +176,58 @@ def test_bmat_run_dry_run_creates_dag_tool_ledger_and_workbench(tmp_path: Path) 
     assert (bundle / "tool_call_ledger.json").exists()
     assert list((bundle / "reports").glob("*/index.md"))
     assert list((bundle / "reports").glob("*/lead-decision.md"))
+    index_text = next((bundle / "reports").glob("*/index.md")).read_text(encoding="utf-8")
+    assert "[Lead Decision](./lead-decision.md)" in index_text
+    assert "[Results Integration](./results-integration.md)" in index_text
+
+
+def test_bmat_export_workbench_file_contains_artifacts(tmp_path: Path) -> None:
+    bundle = tmp_path / "run_bundle"
+    run_result = subprocess.run(
+        [
+            sys.executable,
+            str(BMAT_RUN),
+            "--alias",
+            "evidence-audit-team",
+            "--mode",
+            "audit",
+            "--question",
+            "synthetic workbench export smoke",
+            "--out",
+            str(bundle),
+            "--dry-run",
+            "--validate",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert run_result.returncode == 0, run_result.stdout + run_result.stderr
+
+    out = tmp_path / "workbench.md"
+    export_result = subprocess.run(
+        [
+            sys.executable,
+            str(BMAT_EXPORT),
+            "--bundle",
+            str(bundle),
+            "--format",
+            "markdown",
+            "--out",
+            str(out),
+            "--force",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert export_result.returncode == 0, export_result.stdout + export_result.stderr
+    text = out.read_text(encoding="utf-8")
+    assert "# BMAT Research Workbench" in text
+    assert "# Lead Decision" in text
+    assert "# Source Corpus" in text
+    assert "# Results Integration" in text
 
 
 def test_bmat_run_normalizes_workflow_dag_to_requested_mode(tmp_path: Path) -> None:

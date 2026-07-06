@@ -1,7 +1,7 @@
 {
     "name":  "biomedical-agent-teams",
-    "version":  "1.0.0",
-    "adapter_version":  "1.0.0",
+    "version":  "1.1.0",
+    "adapter_version":  "1.1.0",
     "upstream_suite":  "biomedical-agent-teams-claude",
     "claude_code_plugin":  true,
     "agent_count":  36,
@@ -11,7 +11,7 @@
     "contract_count":  18,
     "reference_count":  10,
     "script_count":  11,
-    "test_fixture_count":  12,
+    "test_fixture_count":  11,
     "eval_count":  3,
     "golden_task_count":  28,
     "loop_count":  4,

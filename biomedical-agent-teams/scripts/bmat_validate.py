@@ -32,10 +32,6 @@ BUNDLE_FILES = {
     "final_text": "final.md",
 }
 
-BUNDLE_FILE_ALIASES = {
-    "preflight": ("preflight.json",),
-}
-
 OPTIONAL_BUNDLE_FILES = {
     "lead_decision": "lead_decision.json",
     "results_integration": "results_integration.json",
@@ -250,14 +246,7 @@ def read_text(path: Path, key: str, findings: list[Finding]) -> str:
 
 
 def resolve_bundle_path(bundle: Path, key: str, filename: str) -> Path:
-    canonical = bundle / filename
-    if canonical.exists():
-        return canonical
-    for alias in BUNDLE_FILE_ALIASES.get(key, ()):
-        candidate = bundle / alias
-        if candidate.exists():
-            return candidate
-    return canonical
+    return bundle / filename
 
 
 def input_paths(args: argparse.Namespace) -> dict[str, Path | None]:
@@ -288,18 +277,6 @@ def load_artifacts(paths: dict[str, Path | None], findings: list[Finding]) -> di
         if path is None:
             artifacts[key] = "" if key == "final_text" else None
             continue
-        if path.name in BUNDLE_FILE_ALIASES.get(key, ()):
-            findings.append(
-                Finding(
-                    "WARN",
-                    "LEGACY_BUNDLE_ARTIFACT_NAME",
-                    (
-                        f"{path.name} is accepted as a legacy alias; use "
-                        f"{BUNDLE_FILES[key]} as the canonical artifact name"
-                    ),
-                    str(path),
-                )
-            )
         if key == "final_text":
             artifacts[key] = read_text(path, key, findings)
         else:
@@ -547,6 +524,16 @@ def lead_decision_required_reason(artifacts: dict[str, Any], required_label: str
     return None
 
 
+def expected_lead_decision_mode_rules(required_reason: str) -> set[str]:
+    return {
+        "full_protocol_required": {"full_protocol_required"},
+        "team_level_selective_dag_required": {"team_level_selective_dag_required"},
+        "audit_required": {"audit_required"},
+        "deep_required": {"deep_required"},
+        "standard_source_backed_required": {"standard_source_backed_required"},
+    }.get(required_reason, {required_reason})
+
+
 def validate_lead_decision_policy(
     artifacts: dict[str, Any],
     findings: list[Finding],
@@ -583,12 +570,16 @@ def validate_lead_decision_policy(
 
     if required_reason is not None:
         mode_rule = str(lead_decision.get("mode_rule", "")).strip()
-        if mode_rule in {"quick_or_narrow_standard_optional", ""}:
+        expected_mode_rules = expected_lead_decision_mode_rules(required_reason)
+        if mode_rule not in expected_mode_rules:
             findings.append(
                 Finding(
                     "ERROR",
-                    "LEAD_DECISION_MODE_RULE_UNDERSTATES_REQUIREMENT",
-                    f"lead_decision mode_rule must reflect required route reason {required_reason}",
+                    "LEAD_DECISION_MODE_RULE_MISMATCH",
+                    (
+                        f"lead_decision mode_rule {mode_rule!r} must reflect required route "
+                        f"reason {required_reason!r}; expected one of {sorted(expected_mode_rules)!r}"
+                    ),
                     OPTIONAL_BUNDLE_FILES["lead_decision"],
                 )
             )

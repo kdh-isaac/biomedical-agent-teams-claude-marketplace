@@ -4,13 +4,13 @@
                   "name":  "Donghyun Kim",
                   "url":  "https://github.com/kdh-isaac"
               },
-    "description":  "Biomedical Agent Teams (BMAT) v1.0.0 for Claude Code: 36 agent prompts, 6 command teams, workflow DAGs, domain packs, results integration, tool-call ledger checks, validator-backed artifact bundles, and golden eval gates.",
+    "description":  "Biomedical Agent Teams (BMAT) v1.1.0 for Claude Code: 36 agent prompts, 6 command teams, workflow DAGs, domain packs, results integration, tool-call ledger checks, validator-backed artifact bundles, and golden eval gates.",
     "plugins":  [
                     {
                         "name":  "biomedical-agent-teams",
                         "source":  "./biomedical-agent-teams",
                         "description":  "BMAT router: biomedical research council, idea discovery, omics analysis, evidence audit, experiment design, and translational scouting workflows for Claude Code.",
-                        "version":  "1.0.0",
+                        "version":  "1.1.0",
                         "license":  "MIT"
                     }
                 ]

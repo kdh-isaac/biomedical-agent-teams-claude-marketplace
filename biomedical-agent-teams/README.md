@@ -1,6 +1,6 @@
 # Biomedical Agent Teams Skill
 
-BMAT for Claude Code v1.0.0 is a lightweight biomedical workflow router with validator-backed artifacts. `SKILL.md` selects one of six command recipes and keeps detailed governance in lazy-loaded commands, references, schemas, templates, workflows, and scripts.
+BMAT for Claude Code v1.1.0 is a lightweight biomedical workflow router with validator-backed artifacts. `SKILL.md` selects one of six command recipes and keeps detailed governance in lazy-loaded commands, references, schemas, templates, workflows, and scripts.
 
 ## Inventory
 
@@ -15,9 +15,9 @@ BMAT for Claude Code v1.0.0 is a lightweight biomedical workflow router with val
 | Domain packs | 3 |
 | Golden tasks | 28 |
 
-## Key v1.0 Contracts
+## Key Contracts
 
-- `runtime_capability_preflight.json` is the canonical runtime preflight artifact; `preflight.json` is a legacy alias only.
+- `runtime_capability_preflight.json` is the runtime preflight artifact.
 - `lead_decision.json` records the lead scientist/router decision; it is required for standard source-backed, deep, audit, team-DAG, and full-protocol workflows.
 - `Full protocol followed` requires a complete artifact bundle, passing validator, lead decision evidence, and an independent/tool-backed/human review surface where required.
 - Tool, reviewer, omics, or literature results that change claims, rankings, or release labels must be represented in `results_integration.json`.

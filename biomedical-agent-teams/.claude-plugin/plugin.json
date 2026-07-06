@@ -1,7 +1,7 @@
 {
     "name":  "biomedical-agent-teams",
-    "version":  "1.0.0",
-    "description":  "Biomedical Agent Teams (BMAT) v1.0.0 for Claude Code: lightweight biomedical research router with validator-backed bundles, evidence audit, public omics planning, workflow DAGs, results integration, domain packs, and golden eval gates.",
+    "version":  "1.1.0",
+    "description":  "Biomedical Agent Teams (BMAT) v1.1.0 for Claude Code: lightweight biomedical research router with validator-backed bundles, evidence audit, public omics planning, workflow DAGs, results integration, domain packs, and golden eval gates.",
     "author":  {
                    "name":  "Donghyun Kim",
                    "url":  "https://github.com/kdh-isaac"

@@ -24,11 +24,10 @@ def main() -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         if args.out.suffix.lower() == ".md":
-            index = reports / "index.md"
             if args.out.exists() and not args.force:
                 raise FileExistsError(f"{args.out} exists; use --force to overwrite")
-            args.out.write_text(index.read_text(encoding="utf-8"), encoding="utf-8")
-            print(f"BMAT markdown workbench index exported: {args.out.resolve()}")
+            args.out.write_text(bmat_run.combined_markdown_workbench(reports), encoding="utf-8")
+            print(f"BMAT markdown workbench exported: {args.out.resolve()}")
         else:
             args.out.mkdir(parents=True, exist_ok=True)
             for source in reports.glob("*.md"):

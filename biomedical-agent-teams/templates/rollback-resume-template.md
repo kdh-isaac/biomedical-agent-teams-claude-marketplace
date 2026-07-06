@@ -22,9 +22,6 @@ Recommended location inside the active workspace or user-approved output path:
     validation/
 ```
 
-Older bundles may contain `preflight.json`; treat it as a legacy alias for
-`runtime_capability_preflight.json` when resuming.
-
 ## Resume State
 
 | field | value |

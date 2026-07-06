@@ -1,10 +1,10 @@
 ---
 name: biomedical-agent-teams
 description: >
-  BMAT for Claude Code v1.0.0 router for biomedical evidence audit, public-omics
+  BMAT for Claude Code v1.1.0 router for biomedical evidence audit, public-omics
   analysis, hypothesis tournaments, experiment design, translational scouting,
   loop workflows, tool-use/result integration, and validator-backed artifacts.
-version: "1.0.0"
+version: "1.1.0"
 ---
 
 # Biomedical Agent Teams Router

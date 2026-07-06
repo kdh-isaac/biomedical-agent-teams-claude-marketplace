@@ -96,7 +96,7 @@ def test_release_surface_text_files_are_bom_free() -> None:
 def test_version_aligned_in_primary_metadata() -> None:
     version = (SKILL_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
-    assert version == "1.0.0"
+    assert version == "1.1.0"
     assert read_json(SKILL_ROOT / "manifest.json")["version"] == version
     assert read_json(SKILL_ROOT / "manifest.json")["adapter_version"] == version
     assert read_json(SKILL_ROOT / "source-manifest.json")["version"] == version
@@ -133,34 +133,38 @@ def test_manifest_lists_release_resources() -> None:
     assert "evidence-audit-team" in source_manifest["workflow_dags"]
     assert "cell-therapy" in source_manifest["domain_packs"]
     release_note_keys = [key for key in source_manifest if key.startswith("new_in_v")]
-    assert release_note_keys == ["new_in_v1_0_0"]
+    assert release_note_keys == ["new_in_v1_1_0"]
     assert (
         "runtime-capability-preflight-canonical-artifact-name"
-        in source_manifest["new_in_v1_0_0"]
-    )
-    assert (
-        "legacy-preflight-json-backward-compatible-alias-with-warning"
-        in source_manifest["new_in_v1_0_0"]
+        in source_manifest["new_in_v1_1_0"]
     )
     assert (
         "golden-eval-hard-gates-for-tournament-loop-ranking-and-claude-code-runtime"
-        in source_manifest["new_in_v1_0_0"]
+        in source_manifest["new_in_v1_1_0"]
     )
     assert (
         "global-expected-block-action-gate-for-golden-eval"
-        in source_manifest["new_in_v1_0_0"]
+        in source_manifest["new_in_v1_1_0"]
     )
     assert (
         "tool-call-ledger-schema-and-checker"
-        in source_manifest["new_in_v1_0_0"]
+        in source_manifest["new_in_v1_1_0"]
     )
     assert (
         "workflow-dag-schema-and-six-command-dags"
-        in source_manifest["new_in_v1_0_0"]
+        in source_manifest["new_in_v1_1_0"]
     )
     assert (
         "lead-decision-schema-template-and-full-protocol-gate"
-        in source_manifest["new_in_v1_0_0"]
+        in source_manifest["new_in_v1_1_0"]
+    )
+    assert (
+        "lead-decision-mode-rule-exact-route-validation"
+        in source_manifest["new_in_v1_1_0"]
+    )
+    assert (
+        "complete-markdown-workbench-file-export"
+        in source_manifest["new_in_v1_1_0"]
     )
 
 
@@ -189,7 +193,7 @@ def valid_results_integration_payload() -> dict:
     return {
         "schema_version": "1.0",
         "integration_id": "RI-TEST-001",
-        "plugin_version": "1.0.0",
+        "plugin_version": "1.1.0",
         "source_corpus_lock": "locked",
         "tool_use_log": [
             {
