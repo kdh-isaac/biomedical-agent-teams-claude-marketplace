@@ -15,7 +15,7 @@ red-team, or independent verification.
 
 ## Independence In Tool-Only Runtimes
 
-When the active runtime cannot spawn a separate subagent, role-to-role
+Most Claude Code/agent runtimes cannot spawn a separate subagent, so role-to-role
 "independence" collapses to a same-model second pass. In that case the practical
 source of independence is **tool-backed external corroboration**: an external
 tool call (PubMed, ClinicalTrials.gov, bioRxiv, ChEMBL, Open Targets, or another

@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,7 +28,7 @@ WORKFLOWS = (
 )
 MODES = ("quick", "standard", "deep", "audit", "plan", "run")
 BUNDLE_FILES = (
-    "preflight.json",
+    "runtime_capability_preflight.json",
     "run_state.json",
     "source_corpus.json",
     "claim_ledger.json",
@@ -34,6 +37,7 @@ BUNDLE_FILES = (
     "final.md",
     "README.md",
 )
+UTF8_BOM = "\ufeff"
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,12 +50,57 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def strip_bom(text: str) -> str:
+    if text.startswith(UTF8_BOM):
+        return text[len(UTF8_BOM) :]
+    return text
+
+
+def read_text_file(path: Path) -> str:
+    return strip_bom(path.read_text(encoding="utf-8-sig"))
+
+
 def plugin_version() -> str:
     version_path = Path(__file__).resolve().parents[1] / "VERSION"
     try:
-        return version_path.read_text(encoding="utf-8").strip()
+        return read_text_file(version_path).strip()
     except FileNotFoundError:
         return "unknown"
+
+
+def shell_family() -> str:
+    for value in (os.environ.get("SHELL"), os.environ.get("COMSPEC")):
+        if not value:
+            continue
+        shell = value.replace("\\", "/").rstrip("/").split("/")[-1].lower()
+        if shell in {"bash", "zsh", "sh", "fish", "dash"}:
+            return "bash" if shell in {"sh", "dash"} else shell
+        if shell in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+            return "powershell"
+        if shell in {"cmd", "cmd.exe"}:
+            return "cmd"
+    return "unknown"
+
+
+def availability(value: bool | None) -> str:
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return "unknown"
+
+
+def is_omics_run_scaffold(workflow: str, mode: str) -> bool:
+    return workflow == "omics-analysis-team" and mode == "run"
+
+
+def scaffold_review_skip_reason(workflow: str, mode: str) -> str:
+    if is_omics_run_scaffold(workflow, mode):
+        return (
+            "scaffold default: spawned-subagent support unavailable in the initial scaffold; "
+            "compact inline-only downgrade recorded until a core omics reviewer is completed"
+        )
+    return "scaffold default; fill during workflow execution"
 
 
 def utc_now() -> tuple[str, str]:
@@ -71,14 +120,72 @@ def write_text(path: Path, text: str, force: bool) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def build_payloads(workflow: str, mode: str, topic: str) -> dict[str, dict[str, Any] | str]:
+def quoted_path(path: Path) -> str:
+    return f'"{path}"'
+
+
+def build_payloads(
+    workflow: str,
+    mode: str,
+    topic: str,
+    output_path: Path | None = None,
+) -> dict[str, dict[str, Any] | str]:
     timestamp, date = utc_now()
     version = plugin_version()
     run_id = f"bmat-{workflow}-{mode}-{timestamp.replace(':', '').replace('-', '')}"
     corpus_id = f"corpus-{run_id}"
+    review_skip_reason = scaffold_review_skip_reason(workflow, mode)
+    validator_path = Path(__file__).resolve().parent / "bmat_validate.py"
+    skill_root = Path(__file__).resolve().parents[1]
+    bundle_path = output_path.resolve() if output_path is not None else Path("<this-directory>")
+    validator_command = f"python {quoted_path(validator_path)} --bundle {quoted_path(bundle_path)}"
+    runtime_id = f"rt-{run_id}"
 
     preflight = {
-        "runtime_capability_preflight_id": f"rt-{run_id}",
+        "runtime_capability_preflight_id": runtime_id,
+        "runtime_id": runtime_id,
+        "runtime_client": "claude-code",
+        "plugin_version": version,
+        "workspace_root": str(bundle_path),
+        "host_os": platform.system() or "unknown",
+        "path_style": "windows" if os.name == "nt" else "posix",
+        "python_invocation": sys.executable,
+        "shell_family": shell_family(),
+        "claude_code_runtime_capability_surface": [
+            "local_file_read",
+            "local_file_write",
+            "local_shell",
+            "validator_cli",
+        ],
+        "capabilities": {
+            "web_search_available": "unknown",
+            "shell_available": availability(True),
+            "file_read_available": availability(True),
+            "file_write_available": availability(True),
+            "network_available": "unknown",
+        },
+        "external_bio_tools_available": {},
+        "validator_cli_available": availability(validator_path.exists()),
+        "pairwise_ranking_script_available": availability((skill_root / "scripts" / "bmat_elo.py").exists()),
+        "tool_registry_available": availability((skill_root / "references" / "tool-registry.json").exists()),
+        "results_integration_available": availability(True),
+        "iteration_budget_available": availability(True),
+        "compute_budget": {
+            "mode": mode,
+            "iteration_budget": 1,
+            "max_candidates": 1,
+            "max_pairwise_matches": 0,
+            "max_spawned_reviewers": 0,
+            "max_external_queries": 0,
+        },
+        "validator_unavailable_reason": "none" if validator_path.exists() else "validator_unavailable_due_to_runtime",
+        "spawned_subagents_supported": "unknown",
+        "sandbox_profile": "unknown",
+        "label_ceiling_due_to_runtime": "Contract-shaped artifact bundle",
+        "downgrade_rule": (
+            "Do not claim `Full protocol followed` until independent review, "
+            "tool/result integration, and post-write validation gates pass."
+        ),
         "requested_alias": workflow,
         "selected_mode": mode,
         "deliverable_type": "TODO: compact final, audit bundle, report, notebook, or generated file",
@@ -91,8 +198,8 @@ def build_payloads(workflow: str, mode: str, topic: str) -> dict[str, dict[str, 
         "required_role_outputs": [],
         "skipped_role_outputs_with_reason": [
             {
-                "role": "TODO",
-                "reason": "scaffold only; fill during workflow execution",
+                "role": "omics-code-reviewer" if is_omics_run_scaffold(workflow, mode) else "TODO",
+                "reason": review_skip_reason,
             }
         ],
         "external_tools_allowed": {
@@ -119,7 +226,7 @@ def build_payloads(workflow: str, mode: str, topic: str) -> dict[str, dict[str, 
             "allowed": False,
             "budget": 0,
             "selected_roles": [],
-            "rationale": "scaffold default; update if independent review is available and useful",
+            "rationale": review_skip_reason,
         },
         "team_spawn_plan": {
             "allowed": False,
@@ -129,7 +236,7 @@ def build_payloads(workflow: str, mode: str, topic: str) -> dict[str, dict[str, 
             "nested_spawn_allowed": False,
             "rationale": "scaffold default; use only for independent decision axes",
         },
-        "all_role_spawn_avoidance_reason": "scaffold default: lead-controlled inline-first workflow",
+        "all_role_spawn_avoidance_reason": review_skip_reason,
         "nested_spawn_policy": {
             "allowed": False,
             "authorization": "not requested",
@@ -166,7 +273,10 @@ def build_payloads(workflow: str, mode: str, topic: str) -> dict[str, dict[str, 
             },
         ],
         "final_label": "Partial workflow; formal gates skipped",
-        "downgrade_reasons": ["scaffold created before evidence collection, review, and validation"],
+        "downgrade_reasons": [
+            "scaffold created before evidence collection, review, and validation",
+            review_skip_reason,
+        ],
     }
 
     source_corpus = {
@@ -213,7 +323,7 @@ def build_payloads(workflow: str, mode: str, topic: str) -> dict[str, dict[str, 
         "safety_ethics_privacy_issues": [],
         "failure_mode_checklist": [],
         "excluded_claim_handling": "not assessed in scaffold",
-        "independent_review_status": "not-run",
+        "independent_review_status": review_skip_reason if is_omics_run_scaffold(workflow, mode) else "not-run",
         "minimal_required_corrections": ["complete workflow artifacts before claiming Compact standard or Full protocol"],
         "release_ready_claim_strength": "not-release-ready",
     }
@@ -234,15 +344,17 @@ def build_payloads(workflow: str, mode: str, topic: str) -> dict[str, dict[str, 
         f"- Created: `{timestamp}`\n"
         f"- Topic: {topic}\n\n"
         "## Next Steps\n\n"
-        "1. Complete `preflight.json` before external tools, file writes, code execution, or final wording.\n"
+        "1. Complete `runtime_capability_preflight.json` before external tools, file writes, code execution, or final wording.\n"
         "2. Fill `source_corpus.json` with stable PMID/DOI/accession/NCT/local artifact IDs.\n"
         "3. Add atomic claims to `claim_ledger.json`; final prose should use only allowed wording.\n"
         "4. Update `stage_evaluation.json` and `run_state.json` as gates pass or block.\n"
-        "5. Run `scripts/bmat_validate.py --bundle <this-directory>` before using a high-confidence workflow label.\n"
+        "5. Run the BMAT validator with the plugin script path, not a bundle-local `scripts/` directory:\n"
+        f"   `{validator_command}`\n"
+        "   Re-run this command before using a high-confidence workflow label.\n"
     )
 
     return {
-        "preflight.json": preflight,
+        "runtime_capability_preflight.json": preflight,
         "run_state.json": run_state,
         "source_corpus.json": source_corpus,
         "claim_ledger.json": claim_ledger,
@@ -256,7 +368,7 @@ def build_payloads(workflow: str, mode: str, topic: str) -> dict[str, dict[str, 
 def main() -> int:
     args = parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    payloads = build_payloads(args.workflow, args.mode, args.topic)
+    payloads = build_payloads(args.workflow, args.mode, args.topic, args.out)
     for filename in BUNDLE_FILES:
         path = args.out / filename
         payload = payloads[filename]

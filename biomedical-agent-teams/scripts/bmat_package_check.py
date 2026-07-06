@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the Biomedical Agent Teams package layout (Claude Code edition).
+"""Validate the Biomedical Agent Teams package layout.
 
 This checks the plugin package itself, not an individual BMAT workflow artifact
 bundle. It is intentionally dependency-free so it can run in source checkouts,
@@ -33,6 +33,7 @@ COUNT_KEYS = {
     "reference_count": ("references", "*.md"),
     "loop_count": ("loops", "*.md"),
     "script_count": ("scripts", "*.py"),
+    "workflow_dag_count": ("workflows", "*.json"),
 }
 SOURCE_MANIFEST_COLLECTIONS = {
     "commands": ("commands", ".md"),
@@ -42,7 +43,9 @@ SOURCE_MANIFEST_COLLECTIONS = {
     "references": ("references", ".md"),
     "loops": ("loops", ".md"),
     "scripts": ("scripts", ".py"),
+    "workflow_dags": ("workflows", ".json"),
 }
+CLAUDE_DEFAULT_PROMPT_LIMIT = 3
 SKILL_ROUTER_MAX_BYTES = 16_000
 ROUTER_ROOT_GUARD_PHRASE = (
     "Resolve every command recipe path relative to the directory containing this `SKILL.md`"
@@ -53,6 +56,34 @@ LAZY_LOAD_GUARD_PHRASES = {
     "VALIDATOR_RUNTIME_DOWNGRADE_GUARD_MISSING": "validator_unavailable_due_to_runtime",
     "VALIDATOR_FULL_PROTOCOL_CEILING_MISSING": "Do not claim `Full protocol followed`",
 }
+CLAUDE_CODE_BLOCKED_TERMS = {
+    "CODEX_PLUGIN_REFERENCE": ".codex-plugin",
+    "CODEX_AGENT_TEMPLATE_REFERENCE": "codex-agents",
+    "CODEX_RUNTIME_REFERENCE": "Codex runtime",
+    "CODEX_ADAPTER_REFERENCE": "codex_adapter",
+    "CODEX_CLIENT_FIELD": "codex_client",
+    "CODEX_CAPABILITY_FIELD": "codex_runtime_capability_surface",
+    "NON_CLAUDE_HOST_DELEGATE_REFERENCE": "host" + ".delegate",
+}
+UTF8_BOM = "\ufeff"
+BOM_SIGNATURES = (
+    (b"\xff\xfe\x00\x00", "UTF-32 LE BOM"),
+    (b"\x00\x00\xfe\xff", "UTF-32 BE BOM"),
+    (b"\xef\xbb\xbf", "UTF-8 BOM"),
+    (b"\xff\xfe", "UTF-16 LE BOM"),
+    (b"\xfe\xff", "UTF-16 BE BOM"),
+)
+BOM_CHECK_EXTENSIONS = {
+    ".json",
+    ".jsonl",
+    ".md",
+    ".py",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
+BOM_CHECK_FILENAMES = {"VERSION"}
 
 
 def count_golden_tasks(skill_root: Path, findings: list[Finding]) -> int:
@@ -69,11 +100,14 @@ def special_counts(skill_root: Path, findings: list[Finding]) -> dict[str, int]:
         "eval_count": len(list((skill_root / "evals").glob("*.py"))),
         "golden_task_count": count_golden_tasks(skill_root, findings),
         "agent_registry_count": 1 if (skill_root / "agent-registry.json").exists() else 0,
+        "domain_pack_count": len([path for path in (skill_root / "domain-packs").iterdir() if path.is_dir()])
+        if (skill_root / "domain-packs").exists()
+        else 0,
     }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate a BMAT plugin package (Claude Code edition).")
+    parser = argparse.ArgumentParser(description="Validate a BMAT plugin package.")
     parser.add_argument(
         "--root",
         type=Path,
@@ -84,11 +118,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def strip_bom(text: str) -> str:
+    return text[1:] if text.startswith(UTF8_BOM) else text
+
+
 def read_json(path: Path, findings: list[Finding]) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(strip_bom(path.read_text(encoding="utf-8-sig")))
     except FileNotFoundError:
         findings.append(Finding("ERROR", "FILE_MISSING", "JSON file missing", str(path)))
+    except UnicodeDecodeError as exc:
+        findings.append(Finding("ERROR", "TEXT_DECODE_ERROR", f"could not decode as UTF-8: {exc}", str(path)))
     except json.JSONDecodeError as exc:
         findings.append(Finding("ERROR", "INVALID_JSON", f"invalid JSON: {exc}", str(path)))
     return None
@@ -96,21 +136,52 @@ def read_json(path: Path, findings: list[Finding]) -> Any:
 
 def read_text(path: Path, findings: list[Finding]) -> str:
     try:
-        raw = path.read_bytes()
+        return strip_bom(path.read_text(encoding="utf-8-sig"))
     except FileNotFoundError:
         findings.append(Finding("ERROR", "FILE_MISSING", "file missing", str(path)))
-        return ""
-    if raw.startswith(b"\xef\xbb\xbf"):
-        findings.append(
-            Finding(
-                "ERROR",
-                "BOM_PRESENT",
-                "file starts with a UTF-8 BOM; leading BOM breaks Markdown frontmatter parsing",
-                str(path),
-            )
-        )
-        raw = raw[3:]
-    return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        findings.append(Finding("ERROR", "TEXT_DECODE_ERROR", f"could not decode as UTF-8: {exc}", str(path)))
+    return ""
+
+
+def bom_check_paths(skill_root: Path) -> list[Path]:
+    paths: list[Path] = []
+    plugin_json_path = plugin_json_path_for(skill_root)
+    if plugin_json_path is not None:
+        paths.append(plugin_json_path)
+    marketplace_json_path = marketplace_json_path_for(skill_root)
+    if marketplace_json_path is not None:
+        paths.append(marketplace_json_path)
+
+    for path in sorted(skill_root.rglob("*")):
+        if not path.is_file():
+            continue
+        if any(part in {"__pycache__", ".pytest_cache"} for part in path.parts):
+            continue
+        if path.name in BOM_CHECK_FILENAMES or path.suffix.lower() in BOM_CHECK_EXTENSIONS:
+            paths.append(path)
+    return paths
+
+
+def validate_no_bom_bytes(skill_root: Path, findings: list[Finding]) -> None:
+    for path in bom_check_paths(skill_root):
+        try:
+            with path.open("rb") as handle:
+                prefix = handle.read(4)
+        except OSError as exc:
+            findings.append(Finding("ERROR", "FILE_READ_ERROR", f"could not read file bytes: {exc}", str(path)))
+            continue
+        for signature, label in BOM_SIGNATURES:
+            if prefix.startswith(signature):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "BOM_BYTES_PRESENT",
+                        f"{label} detected at file start; release files must be BOM-free",
+                        str(path),
+                    )
+                )
+                break
 
 
 def resolve_skill_root(root: Path, findings: list[Finding]) -> Path:
@@ -135,14 +206,46 @@ def resolve_skill_root(root: Path, findings: list[Finding]) -> Path:
     return root
 
 
-def plugin_root_for(skill_root: Path) -> Path:
-    """Return the plugin/marketplace root (where .claude-plugin/ lives)."""
-    candidate = skill_root
-    for _ in range(4):
-        if (candidate / ".claude-plugin").exists():
+def plugin_source_root_for(skill_root: Path) -> Path:
+    """Return the source root that owns .claude-plugin/plugin.json."""
+    candidates = [skill_root]
+    if skill_root.parent.name == "skills":
+        candidates.append(skill_root.parents[1])
+    candidates.append(skill_root.parent)
+    for candidate in candidates:
+        if (candidate / ".claude-plugin" / "plugin.json").exists():
             return candidate
-        candidate = candidate.parent
     return skill_root
+
+
+def marketplace_root_for(skill_root: Path) -> Path:
+    """Return the marketplace root that owns .claude-plugin/marketplace.json."""
+    candidates = [skill_root.parent, skill_root]
+    if skill_root.parent.name == "skills":
+        candidates.append(skill_root.parents[1])
+    candidates.extend(skill_root.parents)
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if (candidate / ".claude-plugin" / "marketplace.json").exists():
+            return candidate
+    return skill_root.parent
+
+
+def plugin_json_path_for(skill_root: Path) -> Path | None:
+    plugin_json = plugin_source_root_for(skill_root) / ".claude-plugin" / "plugin.json"
+    if plugin_json.exists():
+        return plugin_json
+    return None
+
+
+def marketplace_json_path_for(skill_root: Path) -> Path | None:
+    marketplace_json = marketplace_root_for(skill_root) / ".claude-plugin" / "marketplace.json"
+    if marketplace_json.exists():
+        return marketplace_json
+    return None
 
 
 def frontmatter_value(frontmatter: str, key: str) -> str | None:
@@ -165,6 +268,7 @@ def frontmatter_value(frontmatter: str, key: str) -> str | None:
 
 
 def extract_frontmatter(text: str, path: Path, findings: list[Finding]) -> dict[str, str]:
+    text = strip_bom(text)
     match = re.match(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", text, re.S)
     if not match:
         findings.append(Finding("ERROR", "FRONTMATTER_MISSING", "frontmatter missing", str(path)))
@@ -201,9 +305,10 @@ def expect_equal(
 
 def validate_versions(skill_root: Path, findings: list[Finding]) -> str:
     version = read_text(skill_root / "VERSION", findings).strip()
-    plugin_root = plugin_root_for(skill_root)
-    plugin_json_path = plugin_root / ".claude-plugin" / "plugin.json"
-    plugin = read_json(plugin_json_path, findings)
+    plugin_json_path = plugin_json_path_for(skill_root)
+    plugin = read_json(plugin_json_path, findings) if plugin_json_path is not None else None
+    marketplace_json_path = marketplace_json_path_for(skill_root)
+    marketplace = read_json(marketplace_json_path, findings) if marketplace_json_path is not None else None
     manifest = read_json(skill_root / "manifest.json", findings)
     source_manifest = read_json(skill_root / "source-manifest.json", findings)
     registry = read_json(skill_root / "agent-registry.json", findings)
@@ -211,7 +316,16 @@ def validate_versions(skill_root: Path, findings: list[Finding]) -> str:
     frontmatter = extract_frontmatter(skill_text, skill_root / "SKILL.md", findings)
 
     if isinstance(plugin, dict):
-        expect_equal(plugin.get("version"), version, "VERSION_MISMATCH", "plugin.json version mismatch", plugin_json_path, findings)
+        expect_equal(plugin.get("version"), version, "VERSION_MISMATCH", "plugin.json version mismatch", plugin_json_path or "", findings)
+    if isinstance(marketplace, dict):
+        plugins = marketplace.get("plugins", [])
+        if isinstance(plugins, list):
+            for entry in plugins:
+                if isinstance(entry, dict) and entry.get("name") == "biomedical-agent-teams":
+                    expect_equal(entry.get("version"), version, "VERSION_MISMATCH", "marketplace plugin version mismatch", marketplace_json_path or "", findings)
+                    break
+            else:
+                findings.append(Finding("ERROR", "MARKETPLACE_PLUGIN_MISSING", "marketplace.json missing biomedical-agent-teams plugin entry", str(marketplace_json_path or "")))
     if isinstance(manifest, dict):
         expect_equal(manifest.get("version"), version, "VERSION_MISMATCH", "manifest version mismatch", skill_root / "manifest.json", findings)
         expect_equal(manifest.get("adapter_version"), version, "VERSION_MISMATCH", "manifest adapter_version mismatch", skill_root / "manifest.json", findings)
@@ -226,9 +340,9 @@ def validate_versions(skill_root: Path, findings: list[Finding]) -> str:
 
 
 def validate_plugin_interface(skill_root: Path, findings: list[Finding]) -> None:
-    """Validate Claude Code .claude-plugin/plugin.json and marketplace.json."""
-    plugin_root = plugin_root_for(skill_root)
-    plugin_json_path = plugin_root / ".claude-plugin" / "plugin.json"
+    plugin_json_path = plugin_json_path_for(skill_root)
+    if plugin_json_path is None:
+        return
     plugin = read_json(plugin_json_path, findings)
     if not isinstance(plugin, dict):
         return
@@ -242,18 +356,39 @@ def validate_plugin_interface(skill_root: Path, findings: list[Finding]) -> None
                     str(plugin_json_path),
                 )
             )
-    marketplace_path = plugin_root / ".claude-plugin" / "marketplace.json"
-    marketplace = read_json(marketplace_path, findings)
-    if isinstance(marketplace, dict):
-        if not marketplace.get("plugins"):
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "MARKETPLACE_PLUGINS_MISSING",
-                    "marketplace.json plugins array missing or empty",
-                    str(marketplace_path),
-                )
+    interface = plugin.get("interface")
+    if interface is None:
+        return
+    if not isinstance(interface, dict):
+        findings.append(Finding("ERROR", "PLUGIN_INTERFACE_INVALID", "plugin.json interface must be an object when present", str(plugin_json_path)))
+        return
+    default_prompts = interface.get("defaultPrompt", [])
+    if not isinstance(default_prompts, list):
+        findings.append(
+            Finding(
+                "ERROR",
+                "DEFAULT_PROMPT_INVALID",
+                "interface.defaultPrompt must be a list",
+                str(plugin_json_path),
             )
+        )
+        return
+    if len(default_prompts) > CLAUDE_DEFAULT_PROMPT_LIMIT:
+        findings.append(
+            Finding(
+                "ERROR",
+                "DEFAULT_PROMPT_LIMIT_EXCEEDED",
+                (
+                    "interface.defaultPrompt exceeds Claude Code loader limit: "
+                    f"maximum {CLAUDE_DEFAULT_PROMPT_LIMIT}, found {len(default_prompts)}"
+                ),
+                str(plugin_json_path),
+            )
+        )
+    marketplace_json_path = marketplace_json_path_for(skill_root)
+    marketplace = read_json(marketplace_json_path, findings) if marketplace_json_path is not None else None
+    if isinstance(marketplace, dict) and not marketplace.get("plugins"):
+        findings.append(Finding("ERROR", "MARKETPLACE_PLUGINS_MISSING", "marketplace.json plugins array missing or empty", str(marketplace_json_path or "")))
 
 
 def validate_counts(skill_root: Path, findings: list[Finding]) -> None:
@@ -335,44 +470,126 @@ def validate_registry(skill_root: Path, findings: list[Finding]) -> None:
         seen.add(agent_id)
         prompt_path = agent.get("prompt_path")
         if not prompt_path or not (skill_root / str(prompt_path)).exists():
-            findings.append(Finding("ERROR", "PROMPT_PATH_MISSING", f"{agent_id} prompt_path missing or file not found", str(skill_root / "agent-registry.json")))
-        # toml_template_path is not used in Claude Code edition
-        if agent.get("toml_template_path"):
-            findings.append(Finding("WARN", "LEGACY_TOML_PATH", f"{agent_id} has leftover toml_template_path (unused in Claude Code)", str(skill_root / "agent-registry.json")))
+            findings.append(Finding("ERROR", "PROMPT_PATH_MISSING", f"{agent_id} prompt_path missing", str(skill_root / "agent-registry.json")))
+        template_path = agent.get("toml_template_path")
+        if template_path:
+            findings.append(Finding("ERROR", "LEGACY_TOML_PATH", f"{agent_id} has Claude-incompatible toml_template_path", str(skill_root / "agent-registry.json")))
 
 
-def validate_registry_schema(skill_root: Path, findings: list[Finding]) -> None:
-    """Validate agent-registry.json against its own contract schema.
+def agent_registry_map(skill_root: Path, findings: list[Finding]) -> dict[str, dict[str, Any]]:
+    registry = read_json(skill_root / "agent-registry.json", findings)
+    if not isinstance(registry, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for agent in registry.get("agents", []):
+        if isinstance(agent, dict) and str(agent.get("agent_id", "")).strip():
+            out[str(agent["agent_id"])] = agent
+    return out
 
-    Regression guard for contract drift: the runtime enum in
-    contracts/agent-registry.schema.json once said ["codex"] while the shipped
-    agent-registry.json declared runtime "claude-code", so the registry failed
-    validation against its own schema. This check catches that class of bug at
-    package time. It is optional: if `jsonschema` is not importable (the script
-    is otherwise dependency-free), it is skipped silently.
-    """
-    schema_path = skill_root / "contracts" / "agent-registry.schema.json"
-    registry_path = skill_root / "agent-registry.json"
-    if not schema_path.exists() or not registry_path.exists():
+
+def validate_workflow_dags(skill_root: Path, findings: list[Finding]) -> None:
+    workflows_root = skill_root / "workflows"
+    agents = agent_registry_map(skill_root, findings)
+    expected_aliases = {
+        "biomedical-research-council",
+        "idea-discovery-team",
+        "omics-analysis-team",
+        "evidence-audit-team",
+        "experiment-design-team",
+        "translational-scout-team",
+    }
+    seen_aliases: set[str] = set()
+    if not workflows_root.exists():
+        findings.append(Finding("ERROR", "WORKFLOW_DAG_DIR_MISSING", "workflows directory missing", str(workflows_root)))
         return
-    try:
-        import jsonschema  # type: ignore
-    except Exception:
+    for path in sorted(workflows_root.glob("*.json")):
+        dag = read_json(path, findings)
+        if not isinstance(dag, dict):
+            continue
+        expect_equal(dag.get("runtime"), "claude-code", "WORKFLOW_DAG_RUNTIME_MISMATCH", "workflow DAG runtime mismatch", path, findings)
+        alias = str(dag.get("alias", "")).strip()
+        if alias:
+            seen_aliases.add(alias)
+        if alias and path.stem != alias:
+            findings.append(
+                Finding("ERROR", "WORKFLOW_DAG_FILENAME_ALIAS_MISMATCH", f"{path.name} alias mismatch", str(path))
+            )
+        nodes = dag.get("nodes", [])
+        if not isinstance(nodes, list) or not nodes:
+            findings.append(Finding("ERROR", "WORKFLOW_DAG_NODES_MISSING", "workflow DAG must contain nodes", str(path)))
+            continue
+        node_ids: set[str] = set()
+        for node in nodes:
+            if not isinstance(node, dict):
+                findings.append(Finding("ERROR", "WORKFLOW_DAG_NODE_INVALID", "workflow DAG node must be an object", str(path)))
+                continue
+            node_id = str(node.get("id", "")).strip()
+            agent_id = str(node.get("agent", "")).strip()
+            if node_id in node_ids:
+                findings.append(Finding("ERROR", "WORKFLOW_DAG_DUPLICATE_NODE", f"duplicate node id {node_id}", str(path)))
+            node_ids.add(node_id)
+            if agent_id not in agents:
+                findings.append(Finding("ERROR", "WORKFLOW_DAG_UNKNOWN_AGENT", f"{node_id} references unknown agent {agent_id}", str(path)))
+                continue
+            if node.get("toml_template_path"):
+                findings.append(
+                    Finding("ERROR", "WORKFLOW_DAG_LEGACY_TOML_PATH", f"{node_id} has Claude-incompatible toml_template_path", str(path))
+                )
+            if node.get("spawnable") is True:
+                if agents[agent_id].get("spawnable") is not True:
+                    findings.append(
+                        Finding("ERROR", "WORKFLOW_DAG_AGENT_NOT_SPAWNABLE", f"{node_id} marks non-spawnable agent {agent_id}", str(path))
+                    )
+            requires = node.get("requires", [])
+            if isinstance(requires, list):
+                for dependency in requires:
+                    if str(dependency) not in node_ids:
+                        findings.append(
+                            Finding("ERROR", "WORKFLOW_DAG_DEPENDENCY_ORDER_INVALID", f"{node_id} depends on unknown or later node {dependency}", str(path))
+                        )
+    missing = sorted(expected_aliases - seen_aliases)
+    if missing:
+        findings.append(
+            Finding("ERROR", "WORKFLOW_DAG_ALIAS_COVERAGE_MISSING", f"missing workflow DAGs for {missing}", str(workflows_root))
+        )
+
+
+def validate_domain_packs(skill_root: Path, findings: list[Finding]) -> None:
+    packs_root = skill_root / "domain-packs"
+    if not packs_root.exists():
+        findings.append(Finding("ERROR", "DOMAIN_PACK_DIR_MISSING", "domain-packs directory missing", str(packs_root)))
         return
-    schema = read_json(schema_path, findings)
-    registry = read_json(registry_path, findings)
-    if not isinstance(schema, dict) or not isinstance(registry, dict):
+    required = {
+        "entity-normalization-rules.json",
+        "failure-modes.md",
+        "source-preferences.json",
+        "golden-tasks.jsonl",
+    }
+    packs = [path for path in sorted(packs_root.iterdir()) if path.is_dir()]
+    if not packs:
+        findings.append(Finding("ERROR", "DOMAIN_PACKS_MISSING", "at least one domain pack is required", str(packs_root)))
+    for pack in packs:
+        for filename in sorted(required):
+            if not (pack / filename).exists():
+                findings.append(Finding("ERROR", "DOMAIN_PACK_FILE_MISSING", f"{pack.name} missing {filename}", str(pack)))
+
+
+def validate_fixture_versions(skill_root: Path, version: str, findings: list[Finding]) -> None:
+    fixtures_root = skill_root / "tests" / "fixtures"
+    if not fixtures_root.exists():
         return
-    try:
-        validator_cls = jsonschema.validators.validator_for(schema)
-        validator_cls.check_schema(schema)
-        validator = validator_cls(schema)
-    except Exception as exc:
-        findings.append(Finding("ERROR", "REGISTRY_SCHEMA_INVALID", f"agent-registry.schema.json is not a usable schema: {exc}", str(schema_path)))
-        return
-    for error in sorted(validator.iter_errors(registry), key=lambda e: list(e.path)):
-        location = "/".join(str(part) for part in error.path) or "<root>"
-        findings.append(Finding("ERROR", "REGISTRY_SCHEMA_VIOLATION", f"agent-registry.json violates schema at {location}: {error.message}", str(registry_path)))
+    for path in sorted(fixtures_root.glob("*/*.json")):
+        payload = read_json(path, findings)
+        if not isinstance(payload, dict) or "plugin_version" not in payload:
+            continue
+        expect_equal(
+            payload.get("plugin_version"),
+            version,
+            "FIXTURE_VERSION_MISMATCH",
+            "bundled fixture plugin_version mismatch",
+            path,
+            findings,
+        )
 
 
 def validate_router_mentions(skill_root: Path, findings: list[Finding]) -> None:
@@ -422,50 +639,8 @@ def validate_router_mentions(skill_root: Path, findings: list[Finding]) -> None:
             findings.append(Finding("ERROR", "ROUTER_REFERENCE_MISSING", f"router does not mention command {command}", str(skill_path)))
 
 
-PROMPT_FRONTMATTER_REQUIRED = {
-    "commands": ("description",),
-    "agents": ("name", "description"),
-}
-
-
-def validate_prompt_frontmatter(skill_root: Path, findings: list[Finding]) -> None:
-    """Command and agent prompts must open with a parseable frontmatter block.
-
-    A leading UTF-8 BOM (flagged separately by read_text) or a missing `---`
-    block causes Claude Code to drop the frontmatter, silently discarding
-    command metadata (description/argument-hint/allowed-tools) or agent
-    metadata (name/description/tools). Enforce it as an ERROR here so the
-    package check catches it before publish.
-    """
-    for folder, required in PROMPT_FRONTMATTER_REQUIRED.items():
-        for path in sorted((skill_root / folder).glob("*.md")):
-            text = read_text(path, findings)
-            match = re.match(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", text, re.S)
-            if not match:
-                findings.append(
-                    Finding(
-                        "ERROR",
-                        "PROMPT_FRONTMATTER_MISSING",
-                        f"{folder} prompt is missing a parseable frontmatter block",
-                        str(path),
-                    )
-                )
-                continue
-            frontmatter = match.group(1)
-            for key in required:
-                if not frontmatter_value(frontmatter, key):
-                    findings.append(
-                        Finding(
-                            "ERROR",
-                            "PROMPT_FRONTMATTER_FIELD_MISSING",
-                            f"{folder} prompt frontmatter missing '{key}'",
-                            str(path),
-                        )
-                    )
-
-
 def validate_docs_inventory(skill_root: Path, findings: list[Finding]) -> None:
-    for folder in ("commands", "references", "loops", "templates"):
+    for folder in ("commands", "references", "loops", "templates", "agents"):
         for path in sorted((skill_root / folder).glob("*.md")):
             text = read_text(path, findings)
             match = re.match(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", text, re.S)
@@ -483,19 +658,70 @@ def validate_docs_inventory(skill_root: Path, findings: list[Finding]) -> None:
                 )
 
 
+def validate_claude_runtime_portability(skill_root: Path, findings: list[Finding]) -> None:
+    runtime_schema_text = read_text(skill_root / "contracts" / "runtime-capability-preflight.schema.json", findings)
+    runtime_template_text = read_text(skill_root / "templates" / "runtime-capability-preflight-template.md", findings)
+    required_schema_tokens = (
+        "host_os",
+        "path_style",
+        "python_invocation",
+        "shell_family",
+        "claude_code_runtime_capability_surface",
+        "compute_budget",
+    )
+    for token in required_schema_tokens:
+        if token not in runtime_schema_text:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "RUNTIME_PREFLIGHT_PORTABILITY_FIELD_MISSING",
+                    f"runtime capability preflight schema missing {token}",
+                    str(skill_root / "contracts" / "runtime-capability-preflight.schema.json"),
+                )
+            )
+    required_template_tokens = ("Windows", "macOS", "PowerShell", "zsh", "sys.executable")
+    for token in required_template_tokens:
+        if token not in runtime_template_text:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "RUNTIME_PREFLIGHT_PORTABILITY_TEMPLATE_MISSING",
+                    f"runtime capability preflight template missing {token}",
+                    str(skill_root / "templates" / "runtime-capability-preflight-template.md"),
+                )
+            )
+
+    for folder in ("commands", "references", "loops", "templates", "agents"):
+        for path in sorted((skill_root / folder).glob("*.md")):
+            text = read_text(path, findings)
+            for code, term in CLAUDE_CODE_BLOCKED_TERMS.items():
+                if term in text:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            code,
+                            f"Claude Code-facing docs must not depend on non-Claude Code runtime term {term!r}",
+                            str(path),
+                        )
+                    )
+
+
 def main() -> int:
     args = parse_args()
     findings: list[Finding] = []
     skill_root = resolve_skill_root(args.root, findings)
     if skill_root.exists():
-        validate_versions(skill_root, findings)
+        validate_no_bom_bytes(skill_root, findings)
+        version = validate_versions(skill_root, findings)
         validate_plugin_interface(skill_root, findings)
         validate_counts(skill_root, findings)
         validate_registry(skill_root, findings)
-        validate_registry_schema(skill_root, findings)
+        validate_workflow_dags(skill_root, findings)
+        validate_domain_packs(skill_root, findings)
+        validate_fixture_versions(skill_root, version, findings)
         validate_router_mentions(skill_root, findings)
-        validate_prompt_frontmatter(skill_root, findings)
         validate_docs_inventory(skill_root, findings)
+        validate_claude_runtime_portability(skill_root, findings)
 
     if args.json:
         print(json.dumps([finding.__dict__ for finding in findings], indent=2, sort_keys=True))
@@ -504,7 +730,7 @@ def main() -> int:
             for finding in findings:
                 print(f"{finding.level}: {finding.code}: {finding.message} {finding.path}".rstrip())
         else:
-            print(f"BMAT package check passed (Claude Code edition): {skill_root}")
+            print(f"BMAT package check passed: {skill_root}")
 
     return 1 if any(finding.level == "ERROR" for finding in findings) else 0
 

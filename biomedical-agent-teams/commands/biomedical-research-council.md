@@ -10,15 +10,15 @@ User request: $ARGUMENTS
 
 Run a lead-controlled biomedical research council. Default to Korean. Treat the user as an expert in immunology, CAR cell therapy, and public-omics analysis.
 
-## v0.4.3 Spine
+## Current Workflow Spine
 
 0. Confirm the router `SKILL.md` and this command recipe were read to EOF before
    source expansion, external tool use, file writes, code execution, spawned
    agent claims, or final wording. Set a workflow-label ceiling from the
    artifacts that will actually be produced.
-1. Run runtime capability preflight first: record active Claude Code support for
-   web, shell/code execution, file read/write, network/database access, spawned
-   subagents (Agent tool), sandbox, and downgrade rule.
+1. Run runtime capability preflight first: record active Claude Code support for web,
+   shell/code execution, file read/write, network/database access, spawned
+   subagents, sandbox, and downgrade rule.
 2. Run `protocol-context-locker` to lock question schema, deliverable, evidence scope, risk/safety/privacy class, depth/budget/stop criteria, and human approval gate.
 3. Run preliminary `entity-normalizer` before literature, omics, clinical, or IP expansion.
 4. Lock the source corpus for source-backed outputs using stable identifiers,
@@ -29,14 +29,7 @@ Run a lead-controlled biomedical research council. Default to Korean. Treat the 
 7. Lock the execution strategy using `references/hybrid-execution-policy.md`: default inline-first, add selective spawned review or dependency-aware team-level spawned workflows only when they materially improve review quality.
 8. If `team_level_selective_dag` is selected, run dependency-aware command-level
    team bundles before final ledger synthesis; Phase 2 teams must wait for
-   narrowed candidate claims or designs. When `team_spawn_plan.parallel_dispatch`
-   is enabled, dispatch independent lanes (teams with satisfied `depends_on`)
-   concurrently in dispatch waves per `references/parallel-dispatch-policy.md`,
-   bounded by `max_parallel_lanes`; dependent lanes still wait, and the lead
-   remains the single join point for synthesis, arbitration, and the ledger.
-   Under `join_policy: wait_quorum`, any lane not incorporated must be reported
-   with an honest partial-coverage note. Absent `parallel_dispatch`, run lanes
-   sequentially as before.
+   narrowed candidate claims or designs.
 9. Maintain `central-claim-ledger-evidence-graph` throughout. Specialist lanes and spawned teams must hand off atomic claims, sources/artifacts, uncertainty, and contradictions to the ledger.
 10. For `deep`, `audit`, translational, manuscript-support, generated-file, or long-running work, maintain workflow-run state and biomedical passport state using `templates/workflow-run-template.md` and `templates/biomedical-passport-template.md` or the same field order.
 11. For recurring, scheduled, monitor, watch, inbox, or triage-loop work, maintain loop state using `contracts/loop-state.schema.json` and run `scripts/bmat_loop_check.py` before release.
@@ -50,7 +43,7 @@ Run a lead-controlled biomedical research council. Default to Korean. Treat the 
 17. Apply `references/independent-review-policy.md` before using independent-review wording.
 18. Run the integrity gate and `post-write-final-validator` before final output for high-confidence source-backed deliverables.
 
-## v0.4.3 Label and Artifact Gate
+## Current Label and Artifact Gate
 
 Use the label ceiling below before final writing:
 
@@ -101,6 +94,22 @@ be run because shell/code execution is unavailable, record
 reasons, and final skipped gates. Do not claim `Full protocol followed` in that
 state.
 
+## 1.0 Release-Gate Artifacts
+
+For `standard`, `deep`, `audit`, generated-file, team-DAG, or source-backed
+outputs, keep the 1.0.0 hard-gate artifacts aligned with the narrative:
+
+- Use `workflow_dag.json` when `execution_strategy=team_level_selective_dag`,
+  when `scripts/bmat_run.py` scaffolds the run, or when the final answer claims
+  a planned command-to-agent DAG.
+- Use `results_integration.json` when literature, omics, reviewer, validator,
+  tool, or human-review output changes a claim, ranking, label, or final wording.
+- Use `tool_call_ledger.json` before saying a database, external service, local
+  validator, spawned reviewer, or other tool was used; skipped, unavailable,
+  blocked, or failed tools need an explicit downgrade reason.
+- For included source-corpus rows, record `evidence_spans[]`; when possible,
+  claim-ledger `evidence_edges[]` should point back to those spans.
+
 ## Hybrid Execution Policy
 
 Default to a lead-controlled inline workflow. The lead/router keeps protocol
@@ -122,10 +131,7 @@ Do not spawn every role or every team by default. A spawned team runs its own
 internal recipe inline and returns one formal team report; nested spawning is
 off unless the user explicitly authorizes it. Use
 `templates/team-spawn-plan-template.md` for the team dependency graph and
-review handoff. When independent lanes are dispatched concurrently, follow
-`references/parallel-dispatch-policy.md`: concurrency is derived from the
-dependency graph (never asserted against it), teams never communicate
-laterally, and the lead is the single join point.
+review handoff.
 
 ## Routing
 
@@ -233,7 +239,7 @@ Audit bundle final includes:
 6. source corpus lock status
 7. central claim ledger / evidence graph summary
 8. evidence matrix by lane
-9. hypothesis ranking, tournament summary, or decision table when relevant; for ranked hypothesis deliverables, include the human-readable research overview per `templates/research-overview-template.md` (a reformat of the meta-review and `final_ranking` carrying `result_label` and any partial-coverage note, introducing no claim absent from the ledger)
+9. hypothesis ranking, tournament summary, or decision table when relevant
 10. stage evaluation status when relevant
 11. causal/statistical/provenance/study-quality/safety caveats
 12. recommended kill-tests or next analyses

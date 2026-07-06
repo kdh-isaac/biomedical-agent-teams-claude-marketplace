@@ -9,11 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
-
-# Make sibling modules importable regardless of the caller's working directory.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_golden_eval import read_jsonl, validate_output_rows, validate_task_rows
 

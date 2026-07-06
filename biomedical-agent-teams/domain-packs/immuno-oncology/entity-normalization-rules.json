@@ -1,0 +1,16 @@
+{
+  "domain_pack": "immuno-oncology",
+  "version": "0.1.0",
+  "entity_namespaces": {
+    "gene": ["HGNC", "NCBI Gene"],
+    "protein": ["UniProt"],
+    "cell_type": ["CL", "Cell Ontology"],
+    "disease": ["MONDO", "NCIt"],
+    "trial": ["NCT"]
+  },
+  "normalization_notes": [
+    "Separate antigen target, CAR construct, payload, model organism, tumor line, and endpoint entities.",
+    "Record species and assay scope for every efficacy or persistence claim.",
+    "Do not merge CAR-T, CAR-NK, CAR-macrophage, endogenous TIL, and bulk tumor signatures without explicit evidence."
+  ]
+}

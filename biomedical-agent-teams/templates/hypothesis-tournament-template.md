@@ -9,65 +9,75 @@ experimentable hypotheses.
 | field | value |
 |---|---|
 | tournament_id | HT-YYYYMMDD-001 |
+| schema_version | 1.0 |
 | context_lock |  |
 | source_scope | source-checked / partially source-checked / not source-checked |
 | candidate_budget |  |
 | branch_budget |  |
-| iteration_budget | quick=1 / standard=2 / deep=4 / audit=0 |
-| iterations_used |  |
-| stop_reason | top_k_stable / no_new_survivors / budget_exhausted / single_pass / audit_only |
-| ranking_method | elo-bradley-terry / elo-sequential / qualitative (downgrade fallback) |
+| iteration_budget | quick=1 / standard=2 / deep=3 / audit=1-2 |
+| max_pairwise_matches |  |
+| compute_budget_status | within-budget / budget-exhausted / not-tracked |
 
 ## Candidate Pool
 
-| hypothesis_id | hypothesis | cluster_id | status | first_seen_iteration | elo_rating | matches_played | matches_won | notes |
-|---|---|---|---|---|---|---|---|---|
-| H-001 |  |  | active / merged / held / discarded / winner |  |  |  |  |  |
+| hypothesis_id | hypothesis | cluster_id | status | notes |
+|---|---|---|---|---|
+| H-001 |  |  | active / merged / held / discarded / winner |  |
 
 ## Rounds
-
-R0 runs once. R1–R8 form one tournament iteration; the loop repeats from R1
-using the meta-review generation guidance until the stop criterion is met or
-`iteration_budget` is exhausted. Record one block of rows per iteration
-(suffix round_id with the iteration index, e.g. `R1.2`).
 
 | round_id | round_type | output_summary |
 |---|---|---|
 | R0 | context/entity/source scope lock |  |
-| R1 | diverse generation (seeded by prior meta-review guidance on iterations ≥2) |  |
+| R1 | diverse generation |  |
 | R2 | proximity clustering and duplicate collapse |  |
 | R3 | novelty/plausibility filter |  |
-| R4 | pairwise debate or tournament (emit match records for Elo) |  |
+| R4 | pairwise debate or tournament |  |
 | R5 | evolution or recombination |  |
-| R6 | Bayesian expected information gain ranking (+ Elo aggregation via `bmat_elo.py`) |  |
+| R6 | Elo or qualitative pairwise aggregation plus expected information gain ranking |  |
 | R7 | contradiction red-team and claim ledger |  |
-| R8 | meta-review + convergence-check (stop or iterate) |  |
+| R7b | meta-review synthesis |  |
+| R7c | stop-criterion decision |  |
+| R8 | final recommendation and kill-tests |  |
 
-## Convergence / Meta-Review Log
+## Iteration Log
 
-One row per completed iteration. `meta-review-synthesizer` fills this and
-recommends stop vs. iterate against the stop criterion.
+| iteration_id | input_guidance | new_candidate_count | active_candidate_count | output_summary | stop_decision |
+|---|---|---:|---:|---|---|
+| I-001 | Initial generation from locked context. |  |  |  | continue / stop / block |
 
-| iteration | recurring_weakness_patterns | generation_guidance_for_next_round | top_k_stability | novel_survivors | budget_remaining | convergence_recommendation |
+## Pairwise Matches
+
+| match_id | candidate_a | candidate_b | outcome | winner_id | loser_id | rationale |
 |---|---|---|---|---|---|---|
-| 1 |  |  |  |  |  | stop / iterate |
+| M-001 | H-001 | H-002 | a_wins / b_wins / tie / no_decision |  |  |  |
 
-## Results Integration Log (semi-open loop)
+## Rating Table
 
-One row per result folded back into the tournament. `results-integration-analyst`
-fills this after verifying provenance and mapping the effect to claim IDs. The
-`next_action` is a recommendation to the human gate, not an automatic advance.
-See `references/results-integration-policy.md`.
+Ratings are prioritization aids only. They are not evidence strength, biological
+truth, or validation.
 
-| result_id | source_kind | provenance | affected_hypothesis_ids | affected_claim_ids | effect | ranking_delta | human_gate_status | next_action |
-|---|---|---|---|---|---|---|---|---|
-| R1 | experimental_readout / dataset_reanalysis / new_publication / internal_analysis / reviewer_finding |  |  |  | confirms / refutes / refines / inconclusive |  | pending / approved / rejected / not-required | resume_iteration / route_to_experiment_design / hold / close |
+| hypothesis_id | rating_model | rating | matches | wins | losses | ties | rating_interpretation |
+|---|---|---:|---:|---:|---:|---:|---|
+| H-001 | elo / qualitative / not-applicable |  |  |  |  |  | prioritization-only |
+
+## Meta-Review
+
+| iteration_id | recurring_weakness_patterns | generation_guidance_for_next_round | ranking_sensitivity_notes | stop_or_continue_recommendation |
+|---|---|---|---|---|
+| I-001 |  |  |  | continue / stop / block |
+
+## Stop Decisions
+
+| iteration_id | criterion | decision | rationale |
+|---|---|---|---|
+| I-001 | rank_stability / novelty_exhaustion / unresolved_blockers / budget_exhausted / human_stop | continue / stop / block |  |
 
 ## Ranking Criteria
 
-| hypothesis_id | novelty | evidence_strength | mechanism_specificity | assayability | feasibility | safety_or_privacy_risk | domain_translational_relevance | expected_information_gain | verdict |
-|---|---|---|---|---|---|---|---|---|---|
-| H-001 | low / moderate / high | low / moderate / high | low / moderate / high | low / moderate / high | low / moderate / high | low / moderate / high | low / moderate / high | low / moderate / high | advance / hold / discard |
+| hypothesis_id | novelty | evidence_strength | mechanism_specificity | assayability | feasibility | safety_or_privacy_risk | CAR_cell_relevance | rating | expected_information_gain | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| H-001 | low / moderate / high | low / moderate / high | low / moderate / high | low / moderate / high | low / moderate / high | low / moderate / high | low / moderate / high | prioritization-only | low / moderate / high | advance / hold / discard |
 
 ## Safety Rule
 

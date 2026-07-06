@@ -18,8 +18,9 @@ compact preflight contract with:
 `requested_alias`, `selected_mode`, `deliverable_type`, `evidence_scope`,
 `risk_class`, `required_role_outputs`, `skipped_role_outputs_with_reason`,
 `external_tools_allowed`, `file_write_plan`, `stop_criteria`, and
-`checkpoint_plan`. For v0.4.3+, also record `execution_strategy`,
-`spawned_review_plan`, `team_spawn_plan`,
+`checkpoint_plan`, `execution_strategy`, `spawned_review_plan`,
+`team_spawn_plan`, `host_os`, `path_style`, `python_invocation`, `shell_family`,
+`claude_code_runtime_capability_surface`, and `compute_budget`;
 `all_role_spawn_avoidance_reason`, `nested_spawn_policy`, and
 `post_team_audit_plan`. If runtime capability preflight or this contract is absent,
 use the strongest downgraded workflow label supported by the produced artifacts
@@ -30,6 +31,22 @@ be run because shell/code execution is unavailable, record
 `validator_unavailable_due_to_runtime` in preflight, workflow-run downgrade
 reasons, and final skipped gates. Do not claim `Full protocol followed` in that
 state.
+
+## 1.0 Release-Gate Artifacts
+
+For `standard`, `deep`, `audit`, generated-file, team-DAG, or source-backed
+outputs, keep the 1.0.0 hard-gate artifacts aligned with the narrative:
+
+- Use `workflow_dag.json` when `execution_strategy=team_level_selective_dag`,
+  when `scripts/bmat_run.py` scaffolds the run, or when the final answer claims
+  a planned command-to-agent DAG.
+- Use `results_integration.json` when literature, omics, reviewer, validator,
+  tool, or human-review output changes a claim, ranking, label, or final wording.
+- Use `tool_call_ledger.json` before saying a database, external service, local
+  validator, spawned reviewer, or other tool was used; skipped, unavailable,
+  blocked, or failed tools need an explicit downgrade reason.
+- For included source-corpus rows, record `evidence_spans[]`; when possible,
+  claim-ledger `evidence_edges[]` should point back to those spans.
 
 ## Spawned Team Bundle Policy
 
@@ -56,7 +73,6 @@ claim ledger.
 - `hypothesis-generator`
 - `hypothesis-ranker`
 - `meta-review-synthesizer`
-- `results-integration-analyst`
 - `bayesian-decision-modeler`
 - `central-claim-ledger-evidence-graph`
 - `contradiction-red-team`
@@ -70,7 +86,7 @@ claim ledger.
 - `scientific-writer-citation-agent`
 - `post-write-final-validator`
 
-## Operating Rules
+## Workflow
 
 1. Start with `protocol-context-locker`: question schema, deliverable, evidence scope, risk/safety/privacy class, depth, stop criteria, and human approval gate.
 2. Record runtime capabilities before claiming source-backed, tool-backed, or independent multi-agent work.
@@ -84,114 +100,62 @@ claim ledger.
 10. Use `causal-inference-confounder-analyst` before causal or CAR-T-intrinsic claims.
 11. Use `bayesian-decision-modeler` before recommending the first experiment.
 12. Use `risk-of-bias-study-quality-auditor`, `safety-ethics-privacy-dual-use-auditor`, `contradiction-red-team`, and `claim-level-evidence-verifier` before final ranked recommendations.
-13. For `standard` or `deep` candidate discovery, run the iterated hypothesis tournament loop (below) unless the user asked for a compact brainstorm. Set `iteration_budget` from the mode, and after each iteration use `meta-review-synthesizer` to decide stop-versus-iterate against the stop criterion. Never exceed `iteration_budget`.
+13. For `standard` or `deep` candidate discovery, use the hypothesis tournament loop unless the user asked for a compact brainstorm.
 14. For `deep` or `audit`, maintain workflow-run state and biomedical passport state and run the integrity gate before final ranked recommendations.
 15. Apply `references/independent-review-policy.md` before describing validation as independent.
 16. The writer can use only verified ledger material; run `post-write-final-validator` before final output.
 17. Do not fabricate PMIDs, DOIs, accessions, reagent details, trial status, or public database records.
 18. If this was a spawned team output, provide `spawned_team_output_status`,
     `nested_spawn_used`, and `ledger_handoff_claim_ids` before final ranking.
-19. When the user brings back a result (experimental readout, dataset re-analysis, new paper, internal analysis, or reviewer finding) against an existing tournament, run `results-integration-analyst` under `references/results-integration-policy.md`: verify provenance, map the effect to claim IDs (`confirms`/`refutes`/`refines`/`inconclusive`), propose ranking deltas, and present the human gate. Do not auto-advance the loop past that gate.
-20. For `standard`, `deep`, or `audit` ranked deliverables, produce a human-readable research overview using `templates/research-overview-template.md`. It is a reformat of the meta-review and `final_ranking` — Significance, Innovation, Specific Aims, ranked hypotheses with Elo and rationale, key risks and kill-tests, and next experiments. It introduces no claim absent from the central claim ledger, and it carries the run's `result_label` (e.g. `budget_bounded`) and any partial-coverage note verbatim.
 
 ## Hypothesis Tournament Loop
 
 For `standard` and `deep` idea discovery, use
 `templates/hypothesis-tournament-template.md`,
-`contracts/hypothesis-tournament.schema.json`, or the same field order. The
-tournament is an **iterated convergence loop**, not a single pass. Each
-iteration runs the round sequence below; a meta-review then decides whether to
-stop or run another iteration with improved generation guidance.
+`contracts/hypothesis-tournament.schema.json`, or the same field order:
 
-Set `iteration_budget` in the preflight before the first iteration (see Mode
-Routing for defaults). Record `iterations_used` and a `stop_reason` in the
-tournament state and final output.
-
-Round sequence (one iteration):
-
-1. R0 context/entity/source scope lock (first iteration only; carry the lock
-   forward on later iterations).
-2. R1 diverse hypothesis generation, usually n=8-20 when budget allows. On
-   iterations after the first, seed generation with
-   `generation_guidance_for_next_round` from the previous meta-review and keep
-   surviving winners as protected incumbents.
-3. R2 proximity clustering and duplicate collapse.
-4. R3 novelty/plausibility filter.
-5. R4 pairwise debate or tournament. Record each head-to-head verdict as an
-   `a|b|draw` match. When shell/code execution is available, aggregate the
-   matches into a single ranking with `scripts/bmat_elo.py` (Bradley-Terry by
-   default; deterministic and order-independent) and record the numeric
-   `elo_rating` per candidate. If code execution is unavailable, fall back to a
-   qualitative pairwise ranking and mark `elo_aggregation: not_run` with the
-   runtime downgrade reason.
-6. R5 evolution or recombination of surviving candidates.
-7. R6 Bayesian expected information gain ranking. Use Elo ratings, when present,
-   as a tie-break and transparency signal — never as standalone proof of a
-   hypothesis being correct.
-8. R7 contradiction red-team and claim ledger update.
-9. R8 meta-review and convergence check with `meta-review-synthesizer`: extract
-   recurring weakness patterns across rounds and iterations, produce
-   `generation_guidance_for_next_round`, and record `convergence_signals`
-   (top-k stability versus the previous iteration, novel-survivor count, budget
-   remaining). Then apply the stop criterion below.
-
-### Stop Criterion
-
-After R8, **stop** the loop when any of these holds:
-
-- the top-k ranking is stable versus the previous iteration, or
-- no new candidate survived the R3 novelty/plausibility filter this iteration, or
-- `iteration_budget` (or the compute budget) is exhausted.
-
-Otherwise **iterate**: run another iteration from R1, injecting the meta-review
-`generation_guidance_for_next_round` and carrying protected incumbents forward.
-On the final iteration only, produce the R8-final recommendation with
-kill-tests.
+1. R0 context/entity/source scope lock.
+2. Set `iteration_budget`, `max_candidates`, and `max_pairwise_matches` from
+   the selected mode unless the user explicitly overrides them.
+3. For each iteration, run R1-R7:
+   - R1 diverse hypothesis generation or regeneration from prior meta-review guidance, usually n=8-20 when budget allows.
+   - R2 proximity clustering and duplicate collapse.
+   - R3 novelty/plausibility filter.
+   - R4 pairwise debate or tournament.
+   - R5 evolution or recombination of surviving candidates.
+   - R6 deterministic Elo aggregation when `scripts/bmat_elo.py` and shell/code execution are available; otherwise record qualitative ranking only and downgrade deterministic aggregation claims.
+   - R7 contradiction red-team and claim ledger update.
+4. Run R7b `meta-review-synthesizer` after each iteration to summarize
+   recurring weakness patterns, unsupported-claim patterns, ranking
+   sensitivity, and generation guidance for the next iteration.
+5. Run R7c stop-criterion check. Continue only when the budget allows and rank
+   stability, novelty exhaustion, unresolved blockers, and human stop criteria
+   do not require stopping or blocking.
+6. R8 final recommendation with kill-tests.
 
 Rank by novelty, evidence strength, mechanistic specificity, assayability,
-feasibility, safety/privacy/translational risk, domain/translational relevance,
-and expected information gain. Do not select winners by novelty alone, and do
-not let a single round or a single Elo rating override the red-team and claim
-ledger.
+feasibility, safety/privacy/translational risk, CAR cell therapy relevance, and
+expected information gain. Do not select winners by novelty alone.
+Elo or Bradley-Terry ratings are prioritization aids only; never describe them
+as evidence strength, biological proof, or validation.
 
-## Results Integration (semi-open loop)
+Default compute budgets:
 
-When a result comes back against a tournament that already produced a ranking,
-fold it in with `results-integration-analyst` under
-`references/results-integration-policy.md` rather than starting a fresh
-tournament. This loop is **semi-open**: mapping and ranking movement are
-computed, but advancing the loop is a human decision. BMAT does not close the
-loop autonomously.
-
-1. Inject the result as a `results_integration` record (`result_id`,
-   `source_kind`, `provenance`).
-2. Verify provenance — accession, PMID/DOI, artifact ref, or a `success` row in
-   the tool-call ledger. Unsourced results are `inconclusive` and move nothing.
-3. Map the effect per claim ID: `confirms`, `refutes`, `refines`, or
-   `inconclusive`, with a scope-match note (species, tissue, assay, endpoint).
-4. Propose ranking deltas — as Elo match outcomes / prior adjustments when the
-   Elo layer is active, or the qualitative fallback when it is downgraded.
-5. Present the human gate with `next_action` options: `resume_iteration`,
-   `route_to_experiment_design`, `hold`, or `close`.
-6. On `resume_iteration`, re-enter the tournament from R1 with the adjusted
-   rankings and meta-review guidance; on `route_to_experiment_design`, hand off
-   the confirmed/refuted claim map to the experiment-design lane.
+| Mode | iteration_budget | max_candidates | max_pairwise_matches |
+|---|---:|---:|---:|
+| `quick` | 1 | 4-6 | 0-4 |
+| `standard` | 2 | 8-12 | 12-24 |
+| `deep` | 3 | 12-20 | 24-60 |
+| `audit` | 1-2 | supplied list | targeted |
 
 ## Mode Routing
 
-The mode sets both the depth of roles and the tournament `iteration_budget`.
-Higher modes buy more test-time compute through more iterations and more
-pairwise matches, not just more output fields.
-
-| Mode | `iteration_budget` | Agent selection and depth |
-|---|---|---|
-| `quick` | 1 (no loop) | Generate a small number of hypotheses with `hypothesis-generator` and a light mechanism sanity check. Single pass, no meta-review loop. Use compact final output and mark literature/database status as not source-checked unless verified. |
-| `standard` | up to 2 | Add runtime capability preflight, entity normalization, source corpus lock for source-backed claims, targeted literature/public-omics feasibility, mechanism critique, the iterated hypothesis tournament with `meta-review-synthesizer` and Elo aggregation when code execution is available, and a compact claim ledger. |
-| `deep` | up to 4 | Add workflow-run state, causal/confounder review, Bayesian decision modeling, risk-of-bias, contradiction red-team, safety auditor when triggered, claim/citation verification, independent-review status, and post-write validation. Run the convergence loop until the stop criterion or `iteration_budget` is reached. |
-| `audit` | 0 (no generation) | Do not generate new ideas first. Audit the supplied idea or ranked list against evidence, provenance, causal language, and feasibility before recommending changes. |
-
-Never exceed `iteration_budget`. When the budget is reached before the ranking
-stabilizes, stop and label the result as budget-bounded rather than converged.
+| Mode | Agent selection and depth |
+|---|---|
+| `quick` | Generate a small number of hypotheses with `hypothesis-generator` and a light mechanism sanity check. Use compact final output and mark literature/database status as not source-checked unless verified. |
+| `standard` | Add runtime capability preflight, entity normalization, source corpus lock for source-backed claims, targeted literature/public-omics feasibility, mechanism critique, hypothesis tournament/ranking, and compact claim ledger. |
+| `deep` | Add workflow-run state, causal/confounder review, Bayesian decision modeling, risk-of-bias, contradiction red-team, safety auditor when triggered, claim/citation verification, independent-review status, and post-write validation. |
+| `audit` | Do not generate new ideas first. Audit the supplied idea or ranked list against evidence, provenance, causal language, and feasibility before recommending changes. |
 
 For all ranked recommendations, record useful but unverified ideas as excluded
 or not-ledger-verified claims rather than adding them to the final narrative.
@@ -205,18 +169,16 @@ or not-ledger-verified claims rather than adding them to the final narrative.
 5. central claim ledger summary
 6. source corpus status
 7. candidate hypotheses
-8. hypothesis tournament summary when used, including `iterations_used`, `stop_reason`, and Elo aggregation status
-9. meta-review synthesis: recurring weakness patterns and the human-readable research overview per `templates/research-overview-template.md` (Significance, Innovation, Specific Aims, ranked hypotheses with Elo + rationale, key risks and kill-tests, next experiments), carrying the run's `result_label` and any partial-coverage note
-10. results integration log when a result was folded back in: per result, effect on affected claim IDs, ranking delta, human-gate status, and next action
-11. ranked matrix with expected information gain
-12. red-team and risk-of-bias downgrades
-13. causal/confounder and safety/privacy boundary
-14. recommended experiments or kill-tests
-15. citation/provenance/claim verification status
-16. useful but excluded or not-ledger-verified ideas
-17. independent-review status
-18. post-write validation verdict
-19. workflow-run state, biomedical passport, and integrity-gate status
-20. final claim-strength verdict
-21. spawned team output status and ledger handoff if this recipe was spawned
-22. final workflow label and skipped gates with reasons
+8. hypothesis tournament summary when used
+9. ranked matrix with expected information gain
+10. red-team and risk-of-bias downgrades
+11. causal/confounder and safety/privacy boundary
+12. recommended experiments or kill-tests
+13. citation/provenance/claim verification status
+14. useful but excluded or not-ledger-verified ideas
+15. independent-review status
+16. post-write validation verdict
+17. workflow-run state, biomedical passport, and integrity-gate status
+18. final claim-strength verdict
+19. spawned team output status and ledger handoff if this recipe was spawned
+20. final workflow label and skipped gates with reasons

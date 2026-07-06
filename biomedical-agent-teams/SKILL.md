@@ -1,16 +1,16 @@
 ---
 name: biomedical-agent-teams
 description: >
-  Claude Code biomedical workflow router for life-science research, evidence audit,
-  omics analysis, experiment design, translational scouting, loop workflows,
-  and validator-backed artifact checks.
-version: "0.8.3"
+  BMAT for Claude Code v1.0.0 router for biomedical evidence audit, public-omics
+  analysis, hypothesis tournaments, experiment design, translational scouting,
+  loop workflows, tool-use/result integration, and validator-backed artifacts.
+version: "1.0.0"
 ---
 
 # Biomedical Agent Teams Router
 
 This file is the lightweight router for the Biomedical Agent Teams (BMAT)
-skill. It intentionally stays small so Claude Code does not load the full governance
+plugin. It intentionally stays small so Claude Code does not load the full governance
 manual on every biomedical prompt. Load only the command recipe that matches the
 user request, then follow that recipe to its required references, templates, and
 contracts.
@@ -29,10 +29,10 @@ contracts.
 7. If routing is ambiguous, choose the smallest reversible command and state the
    assumption in the runtime capability preflight.
 
-The current version adds a golden-case eval gate for PMID drift, contradiction,
-and overclaim detection, plus a router-size/lazy-load package check. It also
-hardens runtime capability downgrade handling for environments where
-`scripts/bmat_validate.py` cannot execute.
+The current version adds stricter spawned-instance evidence checks, tool-use
+honesty, results integration, one-page research overview, compute-budget,
+team-DAG, loop-policy, and release-surface checks on top of the golden eval and
+lightweight-router gates.
 
 ## Command Aliases
 
@@ -153,7 +153,7 @@ files are visible, state the boundary and keep analysis isolated from them.
 
 ## Execution Strategy
 
-Default to `inline_first_selective_review`: the main agent executes the
+Default to `inline_first_selective_review`: the main Claude Code agent executes the
 core workflow and selectively uses specialized reviewer lanes only when risk,
 task complexity, or the selected command requires them.
 
@@ -174,13 +174,31 @@ Use these inventory surfaces instead of expanding this router:
 
 - `source-manifest.json`: canonical resource lists and versioned package counts.
 - `manifest.json`: marketplace/runtime metadata counts.
-- `agent-registry.json`: spawnable role metadata and Claude Code Agent subagent bindings.
+- `agent-registry.json`: spawnable role metadata and TOML template bindings.
+- `references/tool-registry.md`: honest tool-use and downgrade registry.
+- `references/tool-registry.json`: deterministic tool IDs for ledger checks.
+- `contracts/results-integration.schema.json`: source/result/claim mapping
+  contract for tool, reviewer, omics, and literature outputs.
+- `contracts/tool-call-ledger.schema.json`: successful, skipped, blocked, or
+  unavailable tool-call evidence contract.
+- `contracts/workflow-dag.schema.json` and `workflows/*.json`: command-to-agent
+  DAG contracts for planned execution and release gates.
+- `domain-packs/`: domain-specific normalization, source preference, failure
+  mode, and golden-task overlays.
+- `templates/research-overview-template.md`: ledger-bound one-page synthesis
+  template for final overview outputs.
+- `templates/research-workbench-index-template.md`: Markdown workbench export
+  entrypoint for reviewer-facing artifacts.
 - `scripts/bmat_docs_list.py`: dependency-free docs inventory helper.
 - `scripts/bmat_package_check.py`: package structure, version, count, router,
   and lazy-load guard checks.
 - `scripts/bmat_selftest.py`: dependency-free local package smoke check.
 - `scripts/bmat_validate.py`: complete artifact bundle schema and policy gate.
+- `scripts/bmat_tool_ledger_check.py`: deterministic tool-use honesty gate.
+- `scripts/bmat_run.py`: local dry-run runner, DAG selector, validator wrapper,
+  and Markdown workbench exporter.
 - `evals/run_golden_eval.py`: golden-case eval gate.
+- `evals/run_model_golden_eval.py`: sample-mode model-in-loop harness boundary.
 - `evals/validate_golden_eval_schema.py`: thin schema-validation wrapper.
 
 Use `scripts/bmat_init_bundle.py` when a task needs a new artifact bundle with
@@ -189,19 +207,20 @@ validator-named files.
 ## Package Maintenance Gates
 
 Before releasing or copying this plugin into a cache directory, run the narrowest
-available checks:
+available checks from the repository or marketplace root:
 
 ```bash
-python scripts/bmat_package_check.py --root <plugin-root>
-python scripts/bmat_selftest.py --root <plugin-root>
-python evals/validate_golden_eval_schema.py --tasks evals/golden_tasks.jsonl --outputs evals/sample_outputs.jsonl
-python evals/run_golden_eval.py --tasks evals/golden_tasks.jsonl --outputs evals/sample_outputs.jsonl --strict --gate
+python plugins/biomedical-agent-teams/skills/biomedical-agent-teams/scripts/bmat_package_check.py --root plugins/biomedical-agent-teams
+python plugins/biomedical-agent-teams/skills/biomedical-agent-teams/scripts/bmat_selftest.py --root plugins/biomedical-agent-teams
+python plugins/biomedical-agent-teams/skills/biomedical-agent-teams/evals/validate_golden_eval_schema.py --tasks plugins/biomedical-agent-teams/skills/biomedical-agent-teams/evals/golden_tasks.jsonl --outputs plugins/biomedical-agent-teams/skills/biomedical-agent-teams/evals/sample_outputs.jsonl
+python plugins/biomedical-agent-teams/skills/biomedical-agent-teams/evals/run_golden_eval.py --tasks plugins/biomedical-agent-teams/skills/biomedical-agent-teams/evals/golden_tasks.jsonl --outputs plugins/biomedical-agent-teams/skills/biomedical-agent-teams/evals/sample_outputs.jsonl --strict --gate
+python biomedical-agent-teams/evals/run_model_golden_eval.py --tasks biomedical-agent-teams/evals/golden_tasks.jsonl --alias evidence-audit-team --runtime claude-code --model sample-model --out bmat_eval_outputs/model-sample.jsonl --sample-mode --then-score --gate
 ```
 
 When test tooling is available, also run the package tests:
 
 ```bash
-uvx --with jsonschema pytest biomedical-agent-teams/tests -q
+uvx --with jsonschema pytest tests plugins/biomedical-agent-teams/skills/biomedical-agent-teams/tests -q
 ```
 
 The package check enforces that this router remains lightweight and that command

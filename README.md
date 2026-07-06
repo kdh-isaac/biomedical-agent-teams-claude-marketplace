@@ -1,37 +1,33 @@
-# Biomedical Agent Teams — Claude Code Edition
+# Biomedical Agent Teams — Claude Code Marketplace
 
-Claude Code 전용 포트: [kdh-isaac/biomedical-agent-teams-codex-marketplace](https://github.com/kdh-isaac/biomedical-agent-teams-codex-marketplace) v0.4.9 를 Claude Code 마켓플레이스 형식(v0.5.0)으로 변환한 패키지.
+Current plugin version: `1.0.0`
+Runtime: Claude Code
+Supported release surface: root `.claude-plugin/marketplace.json` plus `biomedical-agent-teams/.claude-plugin/plugin.json` and `biomedical-agent-teams/SKILL.md`.
 
-## 설치
+Biomedical Agent Teams (BMAT) is a Claude Code plugin for biomedical research coordination, evidence audit, public omics planning, experiment design, translational scouting, and hypothesis discovery. The v1.0 package ships a lightweight router, 6 command teams, 36 role prompts, workflow DAGs, domain packs, results-integration contracts, tool-call ledger checks, and validator-backed artifact bundles.
+
+## Install
 
 ```bash
-claude plugin marketplace add biomedical-agent-teams <이 레포 경로 또는 GitHub URL>
+claude plugin marketplace add biomedical-agent-teams <this-repo-path-or-git-url>
 claude plugin add biomedical-agent-teams
 ```
 
-## 구성
-
-- **6개 연구 팀 커맨드**: `biomedical-research-council`, `idea-discovery-team`, `omics-analysis-team`, `evidence-audit-team`, `experiment-design-team`, `translational-scout-team`
-- **37개 전문 에이전트 프롬프트** (agents/)
-- **검증 스크립트** (scripts/bmat_package_check.py, bmat_validate.py)
-- **황금 평가 케이스** (evals/) — PMID drift, 모순, 과장 탐지
-
-## 원본 대비 변경 사항 (v0.5.0)
-
-| 항목 | Codex (v0.4.9) | Claude Code (v0.5.0) |
-|------|---------------|----------------------|
-| 마켓플레이스 | `.agents/plugins/marketplace.json` | `.claude-plugin/marketplace.json` |
-| 플러그인 메타 | `.codex-plugin/plugin.json` | `.claude-plugin/plugin.json` |
-| Reviewer 스폰 | TOML 템플릿 (`codex-agents/*.toml`) | Claude Code `Agent` 툴 (agent/*.md 직접 참조) |
-| 경로 구조 | `plugins/.../skills/biomedical-agent-teams/` | `biomedical-agent-teams/` (플래트닝) |
-| `agent-registry.json` | `toml_template_path` 포함 | 제거됨, `runtime: "claude-code"` |
-| `source-manifest.json` | `runtime: "codex"` | `runtime: "claude-code"` |
-| capability matrix | `codex-runtime-capability-matrix.md` | `claude-code-runtime-capability-matrix.md` |
-| 패키지 검사 스크립트 | Codex default-prompt 한도 검사 | Claude Code plugin.json 필드 검사 |
-
-## 검증
+## Verify
 
 ```bash
 python biomedical-agent-teams/scripts/bmat_package_check.py --root .
+python biomedical-agent-teams/scripts/bmat_package_check.py --root biomedical-agent-teams
 python biomedical-agent-teams/scripts/bmat_selftest.py --root .
+python biomedical-agent-teams/evals/run_golden_eval.py --tasks biomedical-agent-teams/evals/golden_tasks.jsonl --outputs biomedical-agent-teams/evals/sample_outputs.jsonl --strict --gate
 ```
+
+## v1.0 Release Surface
+
+- Canonical runtime artifact: `runtime_capability_preflight.json`
+- Legacy accepted alias: `preflight.json`
+- Required full-protocol core artifacts: `run_state.json`, `runtime_capability_preflight.json`, `source_corpus.json`, `claim_ledger.json`, `stage_evaluation.json`, `post_write_validation.json`, and `final.md`
+- Conditional gates: `results_integration.json` and `tool_call_ledger.json` when final wording, ranking, or release labels depend on tool/reviewer/result-backed evidence
+- New workflow surfaces: `workflows/*.json`, `domain-packs/*`, `scripts/bmat_run.py`, `scripts/bmat_export_workbench.py`, `scripts/bmat_entailment_check.py`, and `evals/run_model_golden_eval.py`
+
+Historical note: earlier releases were ported from a separate agent-team package. The current repository is maintained as a Claude Code marketplace package and no longer ships legacy TOML reviewer templates.

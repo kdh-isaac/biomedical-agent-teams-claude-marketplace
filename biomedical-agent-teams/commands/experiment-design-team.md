@@ -17,9 +17,8 @@ claims, or final writing, produce or update runtime capability preflight and a
 compact preflight contract with:
 `requested_alias`, `selected_mode`, `deliverable_type`, `evidence_scope`,
 `risk_class`, `required_role_outputs`, `skipped_role_outputs_with_reason`,
-`external_tools_allowed`, `file_write_plan`, `stop_criteria`, and
-`checkpoint_plan`. For v0.4.3+, also record `execution_strategy`,
-`spawned_review_plan`, `team_spawn_plan`,
+`external_tools_allowed`, `file_write_plan`, `stop_criteria`,
+`checkpoint_plan`, `execution_strategy`, `spawned_review_plan`, `team_spawn_plan`,
 `all_role_spawn_avoidance_reason`, `nested_spawn_policy`, and
 `post_team_audit_plan`. If runtime capability preflight or this contract is absent,
 use the strongest downgraded workflow label supported by the produced artifacts
@@ -30,6 +29,22 @@ be run because shell/code execution is unavailable, record
 `validator_unavailable_due_to_runtime` in preflight, workflow-run downgrade
 reasons, and final skipped gates. Do not claim `Full protocol followed` in that
 state.
+
+## 1.0 Release-Gate Artifacts
+
+For `standard`, `deep`, `audit`, generated-file, team-DAG, or source-backed
+outputs, keep the 1.0.0 hard-gate artifacts aligned with the narrative:
+
+- Use `workflow_dag.json` when `execution_strategy=team_level_selective_dag`,
+  when `scripts/bmat_run.py` scaffolds the run, or when the final answer claims
+  a planned command-to-agent DAG.
+- Use `results_integration.json` when literature, omics, reviewer, validator,
+  tool, or human-review output changes a claim, ranking, label, or final wording.
+- Use `tool_call_ledger.json` before saying a database, external service, local
+  validator, spawned reviewer, or other tool was used; skipped, unavailable,
+  blocked, or failed tools need an explicit downgrade reason.
+- For included source-corpus rows, record `evidence_spans[]`; when possible,
+  claim-ledger `evidence_edges[]` should point back to those spans.
 
 ## Spawned Team Bundle Policy
 

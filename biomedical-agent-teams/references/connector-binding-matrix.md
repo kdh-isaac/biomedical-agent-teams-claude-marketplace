@@ -2,10 +2,8 @@
 
 Use this matrix before external browsing, database lookup, recurring loops, or
 source-backed final wording. A connector listed here is a preferred source of
-tool-backed corroboration only when the active Claude Code runtime exposes it and
-the preflight contract allows that external use. In Claude Code, prefer dedicated
-MCP tools over generic WebSearch or WebFetch — see
-`claude-code-runtime-capability-matrix.md` for the full MCP binding table.
+tool-backed corroboration only when the active Claude Code runtime exposes it and the
+preflight contract allows that external use.
 
 Do not report a connector as used unless it was actually called. If a preferred
 connector is unavailable, record the downgrade reason and keep dependent claims

@@ -11,60 +11,45 @@
     "final_ranking"
   ],
   "properties": {
-    "tournament_id": {
-      "type": "string"
-    },
-    "context_lock": {
-      "type": "string"
+    "schema_version": { "type": "string" },
+    "tournament_id": { "type": "string" },
+    "context_lock": { "type": "string" },
+    "iteration_budget": { "type": "integer", "minimum": 1 },
+    "compute_budget_status": {
+      "type": "string",
+      "enum": ["within-budget", "budget-exhausted", "not-tracked"]
     },
     "candidates": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "hypothesis_id",
-          "hypothesis",
-          "status"
-        ],
+        "required": ["hypothesis_id", "hypothesis", "status"],
         "properties": {
-          "hypothesis_id": {
-            "type": "string"
-          },
-          "hypothesis": {
-            "type": "string"
-          },
-          "cluster_id": {
-            "type": "string"
-          },
+          "hypothesis_id": { "type": "string" },
+          "hypothesis": { "type": "string" },
+          "cluster_id": { "type": "string" },
           "status": {
             "type": "string",
-            "enum": [
-              "active",
-              "merged",
-              "held",
-              "discarded",
-              "winner"
-            ]
+            "enum": ["active", "merged", "held", "discarded", "winner"]
           },
-          "notes": {
-            "type": "string"
-          },
-          "elo_rating": {
-            "type": "number"
-          },
-          "matches_played": {
-            "type": "number",
-            "minimum": 0
-          },
-          "matches_won": {
-            "type": "number",
-            "minimum": 0
-          },
-          "first_seen_iteration": {
-            "type": "integer",
-            "minimum": 1
-          }
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "iterations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["iteration_id", "input_guidance", "output_summary", "stop_decision"],
+        "properties": {
+          "iteration_id": { "type": "string" },
+          "input_guidance": { "type": "string" },
+          "output_summary": { "type": "string" },
+          "new_candidate_count": { "type": "integer", "minimum": 0 },
+          "active_candidate_count": { "type": "integer", "minimum": 0 },
+          "stop_decision": { "type": "string" }
         }
       }
     },
@@ -73,15 +58,9 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "round_id",
-          "round_type",
-          "output_summary"
-        ],
+        "required": ["round_id", "round_type", "output_summary"],
         "properties": {
-          "round_id": {
-            "type": "string"
-          },
+          "round_id": { "type": "string" },
           "round_type": {
             "type": "string",
             "enum": [
@@ -91,15 +70,115 @@
               "pairwise-debate",
               "evolution",
               "bayesian-ranking",
-              "red-team",
-              "kill-test-design",
+              "elo-ranking",
               "meta-review",
-              "convergence-check"
+              "stop-criterion",
+              "red-team",
+              "kill-test-design"
             ]
           },
-          "output_summary": {
-            "type": "string"
-          }
+          "output_summary": { "type": "string" }
+        }
+      }
+    },
+    "pairwise_matches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["match_id", "candidate_a", "candidate_b", "outcome"],
+        "properties": {
+          "match_id": { "type": "string" },
+          "candidate_a": { "type": "string" },
+          "candidate_b": { "type": "string" },
+          "winner_id": { "type": "string" },
+          "loser_id": { "type": "string" },
+          "outcome": {
+            "type": "string",
+            "enum": ["a_wins", "b_wins", "tie", "no_decision"]
+          },
+          "rationale": { "type": "string" }
+        }
+      }
+    },
+    "ranking_model": {
+      "type": "string",
+      "enum": ["qualitative", "elo", "bradley-terry", "bayesian-qualitative", "not-applicable"]
+    },
+    "rating_table": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hypothesis_id", "rating", "matches", "rating_interpretation"],
+        "properties": {
+          "hypothesis_id": { "type": "string" },
+          "rating": { "type": "number" },
+          "matches": { "type": "integer", "minimum": 0 },
+          "wins": { "type": "integer", "minimum": 0 },
+          "losses": { "type": "integer", "minimum": 0 },
+          "ties": { "type": "integer", "minimum": 0 },
+          "rating_interpretation": { "type": "string" }
+        }
+      }
+    },
+    "meta_reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "iteration_id",
+          "recurring_weakness_patterns",
+          "generation_guidance_for_next_round",
+          "stop_or_continue_recommendation"
+        ],
+        "properties": {
+          "iteration_id": { "type": "string" },
+          "recurring_weakness_patterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "unsupported_claim_patterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "novelty_vs_feasibility_tension": { "type": "string" },
+          "contradiction_or_safety_patterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "generation_guidance_for_next_round": { "type": "string" },
+          "ranking_sensitivity_notes": { "type": "string" },
+          "research_overview": { "type": "string" },
+          "stop_or_continue_recommendation": { "type": "string" }
+        }
+      }
+    },
+    "stop_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["iteration_id", "criterion", "decision", "rationale"],
+        "properties": {
+          "iteration_id": { "type": "string" },
+          "criterion": {
+            "type": "string",
+            "enum": [
+              "rank_stability",
+              "novelty_exhaustion",
+              "unresolved_blockers",
+              "budget_exhausted",
+              "human_stop",
+              "not-applicable"
+            ]
+          },
+          "decision": {
+            "type": "string",
+            "enum": ["continue", "stop", "block", "not-applicable"]
+          },
+          "rationale": { "type": "string" }
         }
       }
     },
@@ -108,210 +187,17 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "rank",
-          "hypothesis_id",
-          "verdict",
-          "rationale"
-        ],
+        "required": ["rank", "hypothesis_id", "verdict", "rationale"],
         "properties": {
-          "rank": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "hypothesis_id": {
-            "type": "string"
-          },
-          "verdict": {
-            "type": "string"
-          },
-          "rationale": {
-            "type": "string"
-          },
-          "expected_information_gain": {
-            "type": "string"
-          },
-          "elo_rating": {
-            "type": "number"
-          },
-          "matches_played": {
-            "type": "number",
-            "minimum": 0
-          },
-          "matches_won": {
-            "type": "number",
-            "minimum": 0
-          }
+          "rank": { "type": "integer", "minimum": 1 },
+          "hypothesis_id": { "type": "string" },
+          "verdict": { "type": "string" },
+          "rationale": { "type": "string" },
+          "rating": { "type": "number" },
+          "rating_interpretation": { "type": "string" },
+          "expected_information_gain": { "type": "string" }
         }
       }
-    },
-    "iteration_budget": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "iterations_used": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "stop_reason": {
-      "type": "string",
-      "enum": [
-        "top_k_stable",
-        "no_new_survivors",
-        "budget_exhausted",
-        "single_pass",
-        "audit_only"
-      ]
-    },
-    "meta_review": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "iteration",
-          "convergence_recommendation"
-        ],
-        "properties": {
-          "iteration": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "recurring_weakness_patterns": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "generation_guidance_for_next_round": {
-            "type": "string"
-          },
-          "top_k_stability": {
-            "type": "string"
-          },
-          "novel_survivors": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "budget_remaining": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "convergence_recommendation": {
-            "type": "string",
-            "enum": [
-              "stop",
-              "iterate"
-            ]
-          },
-          "research_overview": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "results_integration": {
-      "type": "array",
-      "description": "Optional (v0.7). Records of results folded back into the tournament via the semi-open results-integration loop.",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "result_id",
-          "source_kind",
-          "effect"
-        ],
-        "properties": {
-          "result_id": {
-            "type": "string"
-          },
-          "source_kind": {
-            "type": "string",
-            "enum": [
-              "experimental_readout",
-              "dataset_reanalysis",
-              "new_publication",
-              "internal_analysis",
-              "reviewer_finding"
-            ]
-          },
-          "provenance": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "affected_hypothesis_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "affected_claim_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "effect": {
-            "type": "string",
-            "enum": [
-              "confirms",
-              "refutes",
-              "refines",
-              "inconclusive"
-            ]
-          },
-          "ranking_delta": {
-            "type": "string"
-          },
-          "next_action": {
-            "type": "string",
-            "enum": [
-              "resume_iteration",
-              "route_to_experiment_design",
-              "hold",
-              "close"
-            ]
-          },
-          "human_gate_status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "approved",
-              "rejected",
-              "not-required"
-            ]
-          },
-          "iteration": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "notes": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "max_pairwise_matches": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Budget ceiling on R4 head-to-head matches per iteration (see references/compute-budget-policy.md)."
-    },
-    "max_candidates": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Budget ceiling on hypotheses ranked per iteration after the novelty filter."
-    },
-    "result_label": {
-      "type": "string",
-      "enum": [
-        "converged",
-        "budget_bounded",
-        "single_pass",
-        "audit_only"
-      ],
-      "description": "Honesty label on the final ranking (see references/compute-budget-policy.md). MUST be 'budget_bounded' when stop_reason is 'budget_exhausted' — a budget-bounded result is never reported as converged."
     }
   }
 }

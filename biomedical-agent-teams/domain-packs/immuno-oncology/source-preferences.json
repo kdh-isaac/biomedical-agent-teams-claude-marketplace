@@ -1,0 +1,16 @@
+{
+  "domain_pack": "immuno-oncology",
+  "version": "0.1.0",
+  "preferred_sources": [
+    "primary peer-reviewed mechanistic studies",
+    "registered clinical trial records",
+    "public omics repositories with sample metadata",
+    "validated reagent or construct records"
+  ],
+  "downgrade_sources": [
+    "abstract-only claims",
+    "unreviewed preprints without independent corroboration",
+    "marketing materials",
+    "single assay claims without model or endpoint context"
+  ]
+}

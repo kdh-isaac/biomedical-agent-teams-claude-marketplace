@@ -35,7 +35,7 @@ def test_no_codex_agents_directory():
 
 
 def test_claude_plugin_directory_exists():
-    """Marketplace root must have .claude-plugin/ directory."""
+    """Marketplace root and plugin source root must expose Claude metadata."""
     marketplace_root = SKILL_ROOT.parent
     assert (marketplace_root / ".claude-plugin" / "marketplace.json").exists()
-    assert (marketplace_root / ".claude-plugin" / "plugin.json").exists()
+    assert (SKILL_ROOT / ".claude-plugin" / "plugin.json").exists()

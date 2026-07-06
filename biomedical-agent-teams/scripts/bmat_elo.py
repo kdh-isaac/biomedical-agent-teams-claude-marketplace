@@ -1,49 +1,8 @@
 #!/usr/bin/env python3
-"""Aggregate BMAT pairwise-debate outcomes into a single deterministic ranking.
+"""Deterministically aggregate BMAT pairwise hypothesis matches with Elo.
 
-Used by the idea-discovery hypothesis tournament (round type ``pairwise-debate``)
-to turn a set of head-to-head debate verdicts into one ordered ranking with a
-numeric rating per hypothesis. This reduces reliance on a model self-reporting a
-final order and makes the ranking reproducible from the recorded matches.
-
-The default method is Bradley-Terry maximum likelihood via the MM (Zermelo)
-algorithm. It is order-independent and deterministic: the same match set always
-yields the same ratings, regardless of the order matches were played. A classic
-sequential Elo update is also available for compatibility with Elo-style logs.
-
-This script is dependency-free (standard library only) so it runs in source
-checkouts, marketplace sources, and installed cache roots without extra install.
-
-Input JSON (``--matches PATH`` or stdin):
-
-    {
-      "tournament_id": "HT-20250102-001",
-      "candidates": ["H-001", "H-002", "H-003"],   # optional; inferred if absent
-      "matches": [
-        {"a": "H-001", "b": "H-002", "winner": "a"},
-        {"a": "H-001", "b": "H-003", "winner": "draw"},
-        {"a": "H-002", "b": "H-003", "winner": "b", "weight": 2}
-      ]
-    }
-
-``winner`` is one of ``a`` | ``b`` | ``draw`` (``tie`` accepted as an alias).
-``weight`` is an optional positive multiplier for repeated or high-confidence
-matches (default 1).
-
-Output JSON:
-
-    {
-      "method": "bradley-terry",
-      "ratings": {"H-001": 1547.2, ...},        # Elo-scaled, deterministic
-      "matches_played": {"H-001": 2, ...},
-      "matches_won": {"H-001": 1.5, ...},        # draws count as 0.5
-      "final_ranking": [                          # hypothesis-tournament shape
-        {"rank": 1, "hypothesis_id": "H-001", "elo_rating": 1547.2,
-         "matches_played": 2, "matches_won": 1.5}
-      ],
-      "iterations": 37,
-      "converged": true
-    }
+This helper is local and dependency-free. Elo ratings are prioritization aids
+for tournament transparency, not evidence strength or biological validation.
 """
 
 from __future__ import annotations
@@ -51,282 +10,181 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from pathlib import Path
 from typing import Any
 
 
-ELO_BASE = 1500.0
-ELO_SCALE = 400.0  # points per factor-of-10 strength ratio
-DEFAULT_K = 24.0
-MM_MAX_ITERS = 1000
-MM_TOLERANCE = 1e-9
-# Fractional prior win+loss vs a virtual average opponent. Keeps Bradley-Terry
-# finite when a hypothesis wins or loses all of its matches.
-PRIOR_STRENGTH = 0.5
+DEFAULT_INITIAL_RATING = 1000.0
+DEFAULT_K_FACTOR = 32.0
+UTF8_BOM = "\ufeff"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Aggregate pairwise debate outcomes into a ranking.")
-    parser.add_argument("--matches", type=Path, help="Path to matches JSON. Reads stdin if omitted.")
-    parser.add_argument("--out", type=Path, help="Write result JSON to this path instead of stdout.")
-    parser.add_argument(
-        "--method",
-        choices=("bradley-terry", "elo"),
-        default="bradley-terry",
-        help="bradley-terry (default, order-independent) or elo (sequential).",
-    )
-    parser.add_argument("--k", type=float, default=DEFAULT_K, help="Elo K-factor (elo method only).")
-    parser.add_argument("--selftest", action="store_true", help="Run built-in assertions and exit.")
+    parser = argparse.ArgumentParser(description="Aggregate BMAT pairwise matches with Elo.")
+    parser.add_argument("--input", type=Path, required=True, help="Input JSON file with matches.")
+    parser.add_argument("--output", type=Path, help="Optional output JSON file.")
+    parser.add_argument("--initial-rating", type=float, default=None)
+    parser.add_argument("--k-factor", type=float, default=None)
     return parser.parse_args()
 
 
-def normalize_winner(value: Any) -> str:
-    text = str(value).strip().lower()
-    if text in {"a", "b"}:
-        return text
-    if text in {"draw", "tie", "d"}:
-        return "draw"
-    raise ValueError(f"invalid winner value: {value!r} (expected a|b|draw)")
+def strip_bom(text: str) -> str:
+    if text.startswith(UTF8_BOM):
+        return text[len(UTF8_BOM) :]
+    return text
 
 
-def load_matches(payload: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
-    raw_matches = payload.get("matches")
-    if not isinstance(raw_matches, list) or not raw_matches:
-        raise ValueError("payload.matches must be a non-empty array")
+def read_text_file(path: Path) -> str:
+    return strip_bom(path.read_text(encoding="utf-8-sig"))
 
-    matches: list[dict[str, Any]] = []
-    inferred: list[str] = []
-    for index, match in enumerate(raw_matches):
-        if not isinstance(match, dict):
-            raise ValueError(f"matches[{index}] must be an object")
-        a = str(match.get("a", "")).strip()
-        b = str(match.get("b", "")).strip()
-        if not a or not b:
-            raise ValueError(f"matches[{index}] must have non-empty 'a' and 'b'")
-        if a == b:
-            raise ValueError(f"matches[{index}] cannot pit a hypothesis against itself")
-        winner = normalize_winner(match.get("winner"))
-        weight = match.get("weight", 1)
+
+def load_payload(path: Path) -> dict[str, Any]:
+    payload = json.loads(read_text_file(path))
+    if not isinstance(payload, dict):
+        raise SystemExit("input JSON must be an object")
+    return payload
+
+
+def numeric_setting(
+    payload: dict[str, Any],
+    key: str,
+    cli_value: float | None,
+    default: float,
+    *,
+    minimum: float | None = None,
+) -> float:
+    raw = payload[key] if key in payload else cli_value if cli_value is not None else default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(f"{key} must be numeric") from exc
+    if not math.isfinite(value):
+        raise SystemExit(f"{key} must be finite")
+    if minimum is not None and value < minimum:
+        raise SystemExit(f"{key} must be >= {minimum:g}")
+    return value
+
+
+def expected_score(rating_a: float, rating_b: float) -> float:
+    return 1.0 / (1.0 + 10 ** ((rating_b - rating_a) / 400.0))
+
+
+def normalized_outcome(match: dict[str, Any]) -> tuple[str, str, float, float]:
+    outcome = str(match.get("outcome", "")).strip()
+    candidate_a = str(match.get("candidate_a") or match.get("winner_id") or "").strip()
+    candidate_b = str(match.get("candidate_b") or match.get("loser_id") or "").strip()
+    winner = str(match.get("winner_id", "")).strip()
+    loser = str(match.get("loser_id", "")).strip()
+
+    if outcome == "tie":
+        if not candidate_a or not candidate_b:
+            raise ValueError("tie matches require candidate_a and candidate_b")
+        return candidate_a, candidate_b, 0.5, 0.5
+    if outcome == "a_wins":
+        if not candidate_a or not candidate_b:
+            raise ValueError("a_wins matches require candidate_a and candidate_b")
+        return candidate_a, candidate_b, 1.0, 0.0
+    if outcome == "b_wins":
+        if not candidate_a or not candidate_b:
+            raise ValueError("b_wins matches require candidate_a and candidate_b")
+        return candidate_a, candidate_b, 0.0, 1.0
+    if outcome == "win":
+        if not winner or not loser:
+            raise ValueError("win matches require winner_id and loser_id")
+        return winner, loser, 1.0, 0.0
+    raise ValueError(f"unsupported outcome: {outcome!r}")
+
+
+def aggregate(payload: dict[str, Any], initial_rating: float | None = None, k_factor: float | None = None) -> dict[str, Any]:
+    initial = numeric_setting(payload, "initial_rating", initial_rating, DEFAULT_INITIAL_RATING)
+    k = numeric_setting(payload, "k_factor", k_factor, DEFAULT_K_FACTOR, minimum=0.0)
+    matches = payload.get("matches", [])
+    if not isinstance(matches, list):
+        raise SystemExit("matches must be a list")
+
+    ratings: dict[str, float] = {}
+    stats: dict[str, dict[str, int]] = {}
+    processed: list[dict[str, Any]] = []
+
+    def ensure(candidate: str) -> None:
+        ratings.setdefault(candidate, initial)
+        stats.setdefault(candidate, {"matches": 0, "wins": 0, "losses": 0, "ties": 0})
+
+    for index, raw_match in enumerate(matches, start=1):
+        if not isinstance(raw_match, dict):
+            raise SystemExit(f"matches[{index}] must be an object")
         try:
-            weight = float(weight)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"matches[{index}].weight must be numeric") from exc
-        if weight <= 0:
-            raise ValueError(f"matches[{index}].weight must be positive")
-        matches.append({"a": a, "b": b, "winner": winner, "weight": weight})
-        for candidate in (a, b):
-            if candidate not in inferred:
-                inferred.append(candidate)
+            a_id, b_id, score_a, score_b = normalized_outcome(raw_match)
+        except ValueError as exc:
+            raise SystemExit(f"matches[{index}]: {exc}") from exc
+        if not a_id or not b_id or a_id == b_id:
+            raise SystemExit(f"matches[{index}]: candidates must be non-empty and distinct")
 
-    declared = payload.get("candidates")
-    if isinstance(declared, list) and declared:
-        candidates = [str(c).strip() for c in declared if str(c).strip()]
-        for candidate in inferred:
-            if candidate not in candidates:
-                candidates.append(candidate)
-    else:
-        candidates = inferred
-    return candidates, matches
-
-
-def tally(candidates: list[str], matches: list[dict[str, Any]]) -> tuple[dict[str, float], dict[str, float]]:
-    played = {c: 0.0 for c in candidates}
-    won = {c: 0.0 for c in candidates}
-    for match in matches:
-        a, b, winner, weight = match["a"], match["b"], match["winner"], match["weight"]
-        played[a] += weight
-        played[b] += weight
-        if winner == "a":
-            won[a] += weight
-        elif winner == "b":
-            won[b] += weight
-        else:  # draw
-            won[a] += 0.5 * weight
-            won[b] += 0.5 * weight
-    return played, won
-
-
-def strengths_to_elo(strengths: dict[str, float]) -> dict[str, float]:
-    logs = [math.log(s) for s in strengths.values()]
-    mean_log = sum(logs) / len(logs)
-    ratings = {}
-    for candidate, strength in strengths.items():
-        ratings[candidate] = round(ELO_BASE + (ELO_SCALE / math.log(10.0)) * (math.log(strength) - mean_log), 1)
-    return ratings
-
-
-def bradley_terry(candidates: list[str], matches: list[dict[str, Any]]) -> tuple[dict[str, float], int, bool]:
-    """Bradley-Terry strengths via the MM algorithm with a symmetric prior."""
-    strength = {c: 1.0 for c in candidates}
-    # wins[i] = fractional wins for i (draw = 0.5); pair_weight[(i,j)] = total games i vs j
-    wins = {c: PRIOR_STRENGTH for c in candidates}
-    pair_weight: dict[tuple[str, str], float] = {}
-    for match in matches:
-        a, b, winner, weight = match["a"], match["b"], match["winner"], match["weight"]
-        key = (a, b) if a < b else (b, a)
-        pair_weight[key] = pair_weight.get(key, 0.0) + weight
-        if winner == "a":
-            wins[a] += weight
-        elif winner == "b":
-            wins[b] += weight
-        else:
-            wins[a] += 0.5 * weight
-            wins[b] += 0.5 * weight
-    # Prior adds PRIOR_STRENGTH games vs a virtual average opponent per candidate.
-    opponents: dict[str, list[tuple[str, float]]] = {c: [] for c in candidates}
-    for (i, j), w in pair_weight.items():
-        opponents[i].append((j, w))
-        opponents[j].append((i, w))
-
-    converged = False
-    iterations = 0
-    for iterations in range(1, MM_MAX_ITERS + 1):
-        new_strength = {}
-        for c in candidates:
-            denom = PRIOR_STRENGTH / (strength[c] + 1.0)  # prior vs virtual average (strength 1)
-            for opp, w in opponents[c]:
-                denom += w / (strength[c] + strength[opp])
-            new_strength[c] = wins[c] / denom if denom > 0 else strength[c]
-        # normalize (geometric mean = 1) for numerical stability and determinism
-        geo = math.exp(sum(math.log(v) for v in new_strength.values()) / len(new_strength))
-        new_strength = {c: v / geo for c, v in new_strength.items()}
-        delta = max(abs(new_strength[c] - strength[c]) for c in candidates)
-        strength = new_strength
-        if delta < MM_TOLERANCE:
-            converged = True
-            break
-    return strength, iterations, converged
-
-
-def sequential_elo(candidates: list[str], matches: list[dict[str, Any]], k: float) -> dict[str, float]:
-    rating = {c: ELO_BASE for c in candidates}
-    for match in matches:
-        a, b, winner, weight = match["a"], match["b"], match["winner"], match["weight"]
-        expected_a = 1.0 / (1.0 + 10 ** ((rating[b] - rating[a]) / ELO_SCALE))
+        ensure(a_id)
+        ensure(b_id)
+        before_a = ratings[a_id]
+        before_b = ratings[b_id]
+        expected_a = expected_score(before_a, before_b)
         expected_b = 1.0 - expected_a
-        if winner == "a":
-            score_a, score_b = 1.0, 0.0
-        elif winner == "b":
-            score_a, score_b = 0.0, 1.0
+        ratings[a_id] = before_a + k * (score_a - expected_a)
+        ratings[b_id] = before_b + k * (score_b - expected_b)
+
+        stats[a_id]["matches"] += 1
+        stats[b_id]["matches"] += 1
+        if score_a == score_b:
+            stats[a_id]["ties"] += 1
+            stats[b_id]["ties"] += 1
+        elif score_a > score_b:
+            stats[a_id]["wins"] += 1
+            stats[b_id]["losses"] += 1
         else:
-            score_a, score_b = 0.5, 0.5
-        rating[a] += k * weight * (score_a - expected_a)
-        rating[b] += k * weight * (score_b - expected_b)
-    return {c: round(v, 1) for c, v in rating.items()}
-
-
-def build_result(payload: dict[str, Any], method: str, k: float) -> dict[str, Any]:
-    candidates, matches = load_matches(payload)
-    played, won = tally(candidates, matches)
-
-    iterations = 0
-    converged = True
-    if method == "bradley-terry":
-        strengths, iterations, converged = bradley_terry(candidates, matches)
-        ratings = strengths_to_elo(strengths)
-    else:
-        ratings = sequential_elo(candidates, matches, k)
-
-    ranking = sorted(candidates, key=lambda c: (-ratings[c], c))
-    final_ranking = []
-    for rank, c in enumerate(ranking, start=1):
-        final_ranking.append(
+            stats[a_id]["losses"] += 1
+            stats[b_id]["wins"] += 1
+        processed.append(
             {
-                "rank": rank,
-                "hypothesis_id": c,
-                "elo_rating": ratings[c],
-                "matches_played": round(played[c], 3),
-                "matches_won": round(won[c], 3),
+                "match_id": str(raw_match.get("match_id", f"M-{index:03d}")),
+                "candidate_a": a_id,
+                "candidate_b": b_id,
+                "score_a": score_a,
+                "score_b": score_b,
+                "rating_a_before": round(before_a, 6),
+                "rating_b_before": round(before_b, 6),
+                "rating_a_after": round(ratings[a_id], 6),
+                "rating_b_after": round(ratings[b_id], 6),
             }
         )
 
-    result: dict[str, Any] = {
-        "method": method,
-        "ratings": ratings,
-        "matches_played": {c: round(played[c], 3) for c in candidates},
-        "matches_won": {c: round(won[c], 3) for c in candidates},
-        "final_ranking": final_ranking,
+    table = [
+        {
+            "hypothesis_id": candidate,
+            "elo_rating": round(rating, 6),
+            "matches": stats[candidate]["matches"],
+            "wins": stats[candidate]["wins"],
+            "losses": stats[candidate]["losses"],
+            "ties": stats[candidate]["ties"],
+            "rating_is_prioritization_not_evidence": True,
+        }
+        for candidate, rating in sorted(ratings.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    return {
+        "tournament_id": payload.get("tournament_id", ""),
+        "rating_model": "elo",
+        "initial_rating": initial,
+        "k_factor": k,
+        "ratings": table,
+        "processed_matches": processed,
+        "rating_interpretation": "prioritization-only; not evidence strength or biological validation",
     }
-    if payload.get("tournament_id"):
-        result["tournament_id"] = payload["tournament_id"]
-    if method == "bradley-terry":
-        result["iterations"] = iterations
-        result["converged"] = converged
-    return result
-
-
-def run_selftest() -> int:
-    # 1) Transitive set A>B>C: ranking must be A, B, C for both methods.
-    payload = {
-        "candidates": ["A", "B", "C"],
-        "matches": [
-            {"a": "A", "b": "B", "winner": "a"},
-            {"a": "B", "b": "C", "winner": "a"},
-            {"a": "A", "b": "C", "winner": "a"},
-        ],
-    }
-    bt = build_result(payload, "bradley-terry", DEFAULT_K)
-    order = [row["hypothesis_id"] for row in bt["final_ranking"]]
-    assert order == ["A", "B", "C"], f"BT order wrong: {order}"
-    assert bt["converged"], "BT did not converge on simple transitive set"
-    assert bt["ratings"]["A"] > bt["ratings"]["B"] > bt["ratings"]["C"], bt["ratings"]
-
-    # 2) Order-independence: shuffling match order must not change ratings.
-    shuffled = {"candidates": ["A", "B", "C"], "matches": list(reversed(payload["matches"]))}
-    bt2 = build_result(shuffled, "bradley-terry", DEFAULT_K)
-    assert bt["ratings"] == bt2["ratings"], "BT ratings changed with match order"
-
-    # 3) Symmetry: a single draw yields equal ratings.
-    draw = {"candidates": ["X", "Y"], "matches": [{"a": "X", "b": "Y", "winner": "draw"}]}
-    bt3 = build_result(draw, "bradley-terry", DEFAULT_K)
-    assert abs(bt3["ratings"]["X"] - bt3["ratings"]["Y"]) < 1e-6, bt3["ratings"]
-    assert bt3["matches_won"]["X"] == 0.5 and bt3["matches_won"]["Y"] == 0.5
-
-    # 4) Sweep winner beats never-winner even with all-win record (prior keeps it finite).
-    sweep = {
-        "candidates": ["W", "L", "M"],
-        "matches": [
-            {"a": "W", "b": "L", "winner": "a"},
-            {"a": "W", "b": "M", "winner": "a"},
-            {"a": "M", "b": "L", "winner": "a"},
-        ],
-    }
-    bt4 = build_result(sweep, "bradley-terry", DEFAULT_K)
-    assert all(math.isfinite(v) for v in bt4["ratings"].values()), bt4["ratings"]
-    top = bt4["final_ranking"][0]["hypothesis_id"]
-    assert top == "W", f"expected W on top, got {top}"
-
-    # 5) Elo method runs and ranks the transitive set correctly.
-    elo = build_result(payload, "elo", DEFAULT_K)
-    elo_order = [row["hypothesis_id"] for row in elo["final_ranking"]]
-    assert elo_order == ["A", "B", "C"], f"Elo order wrong: {elo_order}"
-
-    # 6) Weight multiplier is honored in the tally.
-    weighted = {"candidates": ["P", "Q"], "matches": [{"a": "P", "b": "Q", "winner": "a", "weight": 3}]}
-    bt5 = build_result(weighted, "bradley-terry", DEFAULT_K)
-    assert bt5["matches_played"]["P"] == 3.0, bt5["matches_played"]
-
-    print("bmat_elo self-test passed.")
-    return 0
 
 
 def main() -> int:
     args = parse_args()
-    if args.selftest:
-        return run_selftest()
-
-    if args.matches:
-        payload = json.loads(args.matches.read_text(encoding="utf-8"))
+    result = aggregate(load_payload(args.input), args.initial_rating, args.k_factor)
+    text = json.dumps(result, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        args.output.write_text(text, encoding="utf-8")
     else:
-        payload = json.loads(sys.stdin.read())
-
-    result = build_result(payload, args.method, args.k)
-    rendered = json.dumps(result, indent=2, ensure_ascii=False)
-    if args.out:
-        args.out.write_text(rendered + "\n", encoding="utf-8")
-    else:
-        print(rendered)
+        print(text, end="")
     return 0
 
 

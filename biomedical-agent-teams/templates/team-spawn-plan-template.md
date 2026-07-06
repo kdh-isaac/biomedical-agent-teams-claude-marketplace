@@ -41,25 +41,6 @@ into a final answer or save as a local workflow artifact.
 | 2 | evidence-audit-team | standard / deep / audit | draft claims or results | claim ledger / draft text / report | formal evidence-audit team report | false | planned / running / complete / skipped |
 | 3 | main lead inline |  | completed spawned outputs | accepted team outputs | ledger merge and final synthesis | false | planned / complete |
 
-## Parallel Dispatch (optional)
-
-Fill this only when independent lanes are dispatched concurrently. Concurrency
-is derived from the DAG above — teams in the same phase with disjoint
-`depends_on` may run in one wave. See `references/parallel-dispatch-policy.md`.
-Omit this block for sequential execution (fully backward-compatible).
-
-| field | value |
-|---|---|
-| parallel_dispatch.enabled | false / true |
-| parallel_dispatch.max_parallel_lanes | 1 / 2 / 3 / ... |
-| parallel_dispatch.join_policy | wait_all / wait_quorum |
-| parallel_dispatch.quorum | (only if wait_quorum) integer ≥ 1 |
-| lane_coverage_label | all_lanes_incorporated / partial_coverage (if wait_quorum dropped a lane) |
-
-| dispatch_wave | teams_in_wave | join_policy | lanes_returned | lanes_incorporated | partial_coverage_note |
-|---|---|---|---|---|---|
-| 0 |  | wait_all |  |  |  |
-
 ## Ledger Handoff
 
 | spawned_output_id | accepted_findings | rejected_or_downgraded_findings | affected_claim_ids | lead_action |

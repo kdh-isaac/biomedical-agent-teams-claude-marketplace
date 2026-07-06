@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover - depends on local environment
 
 BUNDLE_FILES = {
     "run_state": "run_state.json",
-    "preflight": "preflight.json",
+    "preflight": "runtime_capability_preflight.json",
     "source_corpus": "source_corpus.json",
     "claim_ledger": "claim_ledger.json",
     "stage_evaluation": "stage_evaluation.json",
@@ -32,10 +32,26 @@ BUNDLE_FILES = {
     "final_text": "final.md",
 }
 
+BUNDLE_FILE_ALIASES = {
+    "preflight": ("preflight.json",),
+}
+
+OPTIONAL_BUNDLE_FILES = {
+    "results_integration": "results_integration.json",
+    "tool_call_ledger": "tool_call_ledger.json",
+    "workflow_dag": "workflow_dag.json",
+}
+
+INTERNAL_ARTIFACT_PATHS = "_artifact_paths"
+
 SCHEMA_FILES = {
     "run_state": "workflow-run.schema.json",
     "preflight": "preflight-contract.schema.json",
     "source_corpus": "source-corpus.schema.json",
+    "claim_ledger": "claim-ledger.schema.json",
+    "results_integration": "results-integration.schema.json",
+    "tool_call_ledger": "tool-call-ledger.schema.json",
+    "workflow_dag": "workflow-dag.schema.json",
     "stage_evaluation": "stage-evaluation.schema.json",
     "post_write_validation": "post-write-validation.schema.json",
 }
@@ -57,6 +73,7 @@ WORKFLOW_LABELS = {
     PARTIAL_LABEL,
     BLOCKED_LABEL,
 }
+UTF8_BOM = "\ufeff"
 NEGATED_LABEL_PREFIXES = (
     "not labeled ",
     "not label ",
@@ -95,6 +112,12 @@ FULL_PROTOCOL_SURFACES = {
     "external database",
 }
 SAME_MODEL_MARKERS = {"same-model", "same model", "same_model", "self-ratification", "same pass"}
+INDEPENDENT_INSTANCE_SURFACES = {
+    "spawned_subagent",
+    "tool_backed_validator",
+    "external_verifier",
+    "human_reviewer",
+}
 TEAM_LEVEL_STRATEGY = "team_level_selective_dag"
 REQUIRED_RUN_STATE_FIELDS = {
     "run_id",
@@ -130,6 +153,31 @@ OMICS_REVIEW_SKIP_EXCEPTION_MARKERS = {
     "budget-blocked",
     "budget blocked",
 }
+TOOL_USE_TERMS = (
+    "queried",
+    "checked",
+    "ran",
+    "used",
+    "retrieved",
+    "searched",
+    "analyzed with",
+    "analysed with",
+    "tool-backed",
+    "tool backed",
+    "pubmed",
+    "ncbi",
+    "entrez",
+    "geo",
+    "clinicaltrials.gov",
+    "uniprot",
+    "reactome",
+    "조회했다",
+    "검증했다",
+    "분석했다",
+    "검색했다",
+)
+TOOL_SUCCESS_STATUS = {"success"}
+TOOL_NON_SUCCESS_STATUS = {"skipped", "unavailable", "blocked", "failed"}
 
 
 @dataclass(frozen=True)
@@ -149,14 +197,40 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--claim-ledger", type=Path)
     parser.add_argument("--stage-evaluation", type=Path)
     parser.add_argument("--post-write-validation", type=Path)
+    parser.add_argument("--results-integration", type=Path)
+    parser.add_argument("--tool-call-ledger", type=Path)
+    parser.add_argument("--workflow-dag", type=Path)
     parser.add_argument("--final-text", type=Path)
+    parser.add_argument(
+        "--require-label",
+        choices=sorted(WORKFLOW_LABELS),
+        help=(
+            "Require artifacts to satisfy this workflow label even when the "
+            "label is not declared in run_state.json or final.md."
+        ),
+    )
+    parser.add_argument(
+        "--check-tool-ledger",
+        action="store_true",
+        help="Require deterministic tool-call ledger checks for tool-use wording and tool-backed claims.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON findings.")
     return parser.parse_args()
 
 
+def strip_bom(text: str) -> str:
+    if text.startswith(UTF8_BOM):
+        return text[len(UTF8_BOM) :]
+    return text
+
+
+def read_text_file(path: Path) -> str:
+    return strip_bom(path.read_text(encoding="utf-8-sig"))
+
+
 def read_json(path: Path, key: str, findings: list[Finding]) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(read_text_file(path))
     except FileNotFoundError:
         findings.append(Finding("WARN", "ARTIFACT_MISSING", f"{key} artifact not found", str(path)))
     except json.JSONDecodeError as exc:
@@ -166,18 +240,33 @@ def read_json(path: Path, key: str, findings: list[Finding]) -> Any:
 
 def read_text(path: Path, key: str, findings: list[Finding]) -> str:
     try:
-        return path.read_text(encoding="utf-8")
+        return read_text_file(path)
     except FileNotFoundError:
         findings.append(Finding("WARN", "ARTIFACT_MISSING", f"{key} artifact not found", str(path)))
     return ""
+
+
+def resolve_bundle_path(bundle: Path, key: str, filename: str) -> Path:
+    canonical = bundle / filename
+    if canonical.exists():
+        return canonical
+    for alias in BUNDLE_FILE_ALIASES.get(key, ()):
+        candidate = bundle / alias
+        if candidate.exists():
+            return candidate
+    return canonical
 
 
 def input_paths(args: argparse.Namespace) -> dict[str, Path | None]:
     paths: dict[str, Path | None] = {}
     if args.bundle:
         for key, filename in BUNDLE_FILES.items():
-            paths[key] = args.bundle / filename
-    for key in BUNDLE_FILES:
+            paths[key] = resolve_bundle_path(args.bundle, key, filename)
+        for key, filename in OPTIONAL_BUNDLE_FILES.items():
+            candidate = args.bundle / filename
+            if candidate.exists():
+                paths[key] = candidate
+    for key in tuple(BUNDLE_FILES) + tuple(OPTIONAL_BUNDLE_FILES):
         explicit = getattr(args, key, None)
         if explicit is not None:
             paths[key] = explicit
@@ -186,16 +275,90 @@ def input_paths(args: argparse.Namespace) -> dict[str, Path | None]:
 
 def load_artifacts(paths: dict[str, Path | None], findings: list[Finding]) -> dict[str, Any]:
     artifacts: dict[str, Any] = {}
-    for key in BUNDLE_FILES:
+    artifacts[INTERNAL_ARTIFACT_PATHS] = {
+        key: str(path)
+        for key, path in paths.items()
+        if path is not None
+    }
+    for key in tuple(BUNDLE_FILES) + tuple(OPTIONAL_BUNDLE_FILES):
         path = paths.get(key)
         if path is None:
             artifacts[key] = "" if key == "final_text" else None
             continue
+        if path.name in BUNDLE_FILE_ALIASES.get(key, ()):
+            findings.append(
+                Finding(
+                    "WARN",
+                    "LEGACY_BUNDLE_ARTIFACT_NAME",
+                    (
+                        f"{path.name} is accepted as a legacy alias; use "
+                        f"{BUNDLE_FILES[key]} as the canonical artifact name"
+                    ),
+                    str(path),
+                )
+            )
         if key == "final_text":
             artifacts[key] = read_text(path, key, findings)
         else:
             artifacts[key] = read_json(path, key, findings)
     return artifacts
+
+
+def artifact_base_dir(artifacts: dict[str, Any]) -> Path | None:
+    paths = artifacts.get(INTERNAL_ARTIFACT_PATHS)
+    if not isinstance(paths, dict):
+        return None
+    for key in ("run_state", "preflight", "final_text"):
+        value = paths.get(key)
+        if isinstance(value, str) and value:
+            return Path(value).resolve().parent
+    return None
+
+
+def local_artifact_ref_path(artifacts: dict[str, Any], ref: str) -> Path | None:
+    value = ref.strip()
+    if not value or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", value):
+        return None
+    path_text = value.split("#", 1)[0].strip()
+    if not path_text:
+        return None
+    path = Path(path_text)
+    if path.is_absolute():
+        return path.resolve()
+    base_dir = artifact_base_dir(artifacts)
+    if base_dir is None:
+        return None
+    return (base_dir / path).resolve()
+
+
+def validate_local_artifact_ref_exists(
+    artifacts: dict[str, Any],
+    ref: str,
+    *,
+    code: str,
+    message: str,
+    path_label: str,
+    findings: list[Finding],
+) -> None:
+    resolved = local_artifact_ref_path(artifacts, ref)
+    if resolved is None:
+        return
+    base_dir = artifact_base_dir(artifacts)
+    if base_dir is not None:
+        try:
+            resolved.relative_to(base_dir.resolve())
+        except ValueError:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    f"{code}_OUTSIDE_BUNDLE",
+                    f"{message}; local artifact references must stay inside the bundle",
+                    path_label,
+                )
+            )
+            return
+    if not resolved.exists():
+        findings.append(Finding("ERROR", code, message, path_label))
 
 
 def validate_schemas(artifacts: dict[str, Any], findings: list[Finding]) -> None:
@@ -216,7 +379,7 @@ def validate_schemas(artifacts: dict[str, Any], findings: list[Finding]) -> None
             continue
         schema_path = contracts_dir / schema_name
         try:
-            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            schema = json.loads(read_text_file(schema_path))
             jsonschema.validate(artifact, schema)
         except FileNotFoundError:
             findings.append(Finding("WARN", "SCHEMA_FILE_MISSING", f"schema missing for {key}", str(schema_path)))
@@ -268,8 +431,11 @@ def has_affirmative_label_mention(final_norm: str, label_norm: str) -> bool:
     return False
 
 
-def declared_workflow_labels(artifacts: dict[str, Any]) -> set[str]:
+def declared_workflow_labels(artifacts: dict[str, Any], required_label: str | None = None) -> set[str]:
     labels: set[str] = set()
+    if required_label:
+        labels.add(required_label)
+
     run_state_label = workflow_label(artifacts.get("run_state")).strip()
     if run_state_label:
         labels.add(run_state_label)
@@ -280,6 +446,25 @@ def declared_workflow_labels(artifacts: dict[str, Any]) -> set[str]:
         if has_affirmative_label_mention(final_norm, normalized_text(label)):
             labels.add(label)
     return labels
+
+
+def validate_required_label(
+    artifacts: dict[str, Any],
+    findings: list[Finding],
+    required_label: str | None,
+) -> None:
+    if not required_label:
+        return
+    run_state_label = workflow_label(artifacts.get("run_state")).strip()
+    if run_state_label and run_state_label != required_label:
+        findings.append(
+            Finding(
+                "ERROR",
+                "REQUIRED_LABEL_MISMATCH",
+                f"required label {required_label!r} conflicts with run_state final_label {run_state_label!r}",
+                "run_state.json",
+            )
+        )
 
 
 def run_mode(run_state: Any) -> str:
@@ -341,6 +526,46 @@ def claim_strength(claim: dict[str, Any]) -> str:
 
 def is_high_confidence_claim(claim: dict[str, Any]) -> bool:
     return claim_strength(claim) in HIGH_CONFIDENCE_STRENGTH
+
+
+def value_as_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [part.strip() for part in re.split(r"[,;]", value) if part.strip()]
+    return []
+
+
+def value_is_truthy(value: Any) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return normalized_text(value) in {"true", "yes", "used", "required", "external", "tool-backed"}
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return False
+
+
+def claim_id(claim: dict[str, Any]) -> str:
+    return str(claim.get("claim_id", "unknown")).strip() or "unknown"
+
+
+def claim_tool_ids(claim: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for key in ("tool_id", "tool_ids"):
+        ids.extend(value_as_list(claim.get(key)))
+    return list(dict.fromkeys(ids))
+
+
+def claim_result_ids(claim: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for key in ("result_id", "result_ids"):
+        ids.extend(value_as_list(claim.get(key)))
+    return list(dict.fromkeys(ids))
+
+
+def is_tool_backed_claim(claim: dict[str, Any]) -> bool:
+    return value_is_truthy(claim.get("tool_backed")) or bool(claim_tool_ids(claim) or claim_result_ids(claim))
 
 
 def source_ids_from_claim(claim: dict[str, Any]) -> list[str]:
@@ -419,7 +644,7 @@ def has_same_model_marker(surface_text: str) -> bool:
 def registry_agent_ids(findings: list[Finding]) -> set[str]:
     registry_path = Path(__file__).resolve().parents[1] / "agent-registry.json"
     try:
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        registry = json.loads(read_text_file(registry_path))
     except FileNotFoundError:
         findings.append(Finding("ERROR", "AGENT_REGISTRY_MISSING", "agent-registry.json is missing", str(registry_path)))
         return set()
@@ -445,26 +670,25 @@ def spawned_agent_instances(run_state: Any) -> list[dict[str, Any]]:
 
 
 def complete_independent_instances(run_state: Any) -> list[dict[str, Any]]:
-    independent_surfaces = {
-        "spawned_subagent",
-        "tool_backed_validator",
-        "external_verifier",
-        "human_reviewer",
-    }
     return [
         instance
         for instance in spawned_agent_instances(run_state)
-        if instance.get("status") == "complete" and instance.get("execution_surface") in independent_surfaces
+        if instance.get("status") == "complete" and instance.get("execution_surface") in INDEPENDENT_INSTANCE_SURFACES
     ]
 
 
-def complete_spawned_review_roles(run_state: Any) -> list[str]:
+def spawned_review_lanes(run_state: Any) -> list[dict[str, Any]]:
     if not isinstance(run_state, dict):
         return []
+    lanes = run_state.get("spawned_review_lanes", [])
+    if not isinstance(lanes, list):
+        return []
+    return [lane for lane in lanes if isinstance(lane, dict)]
+
+
+def complete_spawned_review_roles(run_state: Any) -> list[str]:
     roles: list[str] = []
-    for lane in run_state.get("spawned_review_lanes", []):
-        if not isinstance(lane, dict):
-            continue
+    for lane in spawned_review_lanes(run_state):
         if lane.get("status") == "complete" and str(lane.get("role", "")).strip():
             roles.append(str(lane["role"]))
     return roles
@@ -637,7 +861,11 @@ def find_duplicate_keys(keys: list[tuple[str, int]]) -> list[tuple[str, int]]:
     return sorted(duplicates)
 
 
-def validate_complete_team_output_fields(output: dict[str, Any], findings: list[Finding]) -> None:
+def validate_complete_team_output_fields(
+    output: dict[str, Any],
+    artifacts: dict[str, Any],
+    findings: list[Finding],
+) -> None:
     team = str(output.get("team", "unknown")).strip() or "unknown"
     artifact_id = str(output.get("artifact_id", "")).strip()
     path = str(output.get("path", "")).strip()
@@ -659,6 +887,15 @@ def validate_complete_team_output_fields(output: dict[str, Any], findings: list[
                 "TEAM_OUTPUT_MISSING_PATH",
                 f"complete team output for {team} must record an output path",
             )
+        )
+    else:
+        validate_local_artifact_ref_exists(
+            artifacts,
+            path,
+            code="TEAM_OUTPUT_PATH_MISSING",
+            message=f"complete team output for {team} references missing artifact path {path}",
+            path_label="run_state.json",
+            findings=findings,
         )
     if not ledger_handoff:
         findings.append(
@@ -767,7 +1004,7 @@ def validate_team_dag_policy(artifacts: dict[str, Any], findings: list[Finding])
             )
 
     for output in complete_outputs:
-        validate_complete_team_output_fields(output, findings)
+        validate_complete_team_output_fields(output, artifacts, findings)
         key = team_artifact_key(output)
         if key is not None and key not in lane_keys:
             findings.append(
@@ -880,20 +1117,457 @@ def validate_team_dag_policy(artifacts: dict[str, Any], findings: list[Finding])
                 )
 
 
-def validate_full_protocol(artifacts: dict[str, Any], findings: list[Finding]) -> None:
+def final_text_has_tool_use_wording(final_text: Any) -> bool:
+    text = normalized_text(final_text)
+    for term in TOOL_USE_TERMS:
+        if re.search(r"[a-z0-9]", term):
+            pattern = rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])"
+            if re.search(pattern, text):
+                return True
+        elif term in text:
+            return True
+    return False
+
+
+def complete_reviewer_or_team_output_used(run_state: Any) -> bool:
+    if not isinstance(run_state, dict):
+        return False
+    for lane in spawned_review_lanes(run_state):
+        if lane.get("status") == "complete":
+            return True
+    for lane in team_spawn_lanes(run_state):
+        if lane.get("status") == "complete":
+            return True
+    for output in run_state.get("team_output_artifacts", []):
+        if isinstance(output, dict) and output.get("status") == "complete":
+            return True
+    return bool(complete_independent_instances(run_state))
+
+
+def structured_results_integration_reasons(artifacts: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    run_state = artifacts.get("run_state")
+    claims = iter_claims(artifacts.get("claim_ledger"))
+    tool_claim_ids = [claim_id(claim) for claim in claims if is_tool_backed_claim(claim)]
+    if tool_claim_ids:
+        reasons.append(f"tool-backed claims: {', '.join(tool_claim_ids)}")
+    if isinstance(run_state, dict):
+        for key in (
+            "tool_use_log",
+            "tool_calls_used",
+            "external_tools_used",
+            "tool_backed_claim_ids",
+            "result_backed_claim_ids",
+        ):
+            if value_is_truthy(run_state.get(key)):
+                reasons.append(f"run_state.{key}")
+        for key in (
+            "results_integration_required",
+            "ranking_changed_by_external_result",
+            "omics_result_changed_claim_strength",
+            "external_result_changed_label",
+            "reviewer_output_changed_claim",
+        ):
+            if value_is_truthy(run_state.get(key)):
+                reasons.append(f"run_state.{key}")
+        if complete_reviewer_or_team_output_used(run_state):
+            reasons.append("complete reviewer/team output requires source-to-claim integration")
+    return list(dict.fromkeys(reasons))
+
+
+def results_rows_by_claim(results_integration: Any) -> dict[str, list[dict[str, Any]]]:
+    rows_by_claim: dict[str, list[dict[str, Any]]] = {}
+    if not isinstance(results_integration, dict):
+        return rows_by_claim
+    for row in results_integration.get("rows", []):
+        if not isinstance(row, dict):
+            continue
+        for cid in value_as_list(row.get("claim_ids")):
+            rows_by_claim.setdefault(cid, []).append(row)
+    return rows_by_claim
+
+
+def validate_results_integration_policy(artifacts: dict[str, Any], findings: list[Finding]) -> None:
+    structured_reasons = structured_results_integration_reasons(artifacts)
+    heuristic_reason = final_text_has_tool_use_wording(artifacts.get("final_text"))
+    results_integration = artifacts.get("results_integration")
+
+    if structured_reasons and results_integration is None:
+        findings.append(
+            Finding(
+                "ERROR",
+                "RESULTS_INTEGRATION_REQUIRED",
+                (
+                    "results_integration.json is required when tool/result/reviewer output "
+                    f"affects claims, rankings, or labels: {'; '.join(structured_reasons)}"
+                ),
+                OPTIONAL_BUNDLE_FILES["results_integration"],
+            )
+        )
+        return
+    if heuristic_reason and results_integration is None:
+        findings.append(
+            Finding(
+                "WARN",
+                "RESULTS_INTEGRATION_HEURISTIC_MISSING",
+                (
+                    "final text contains tool-use wording; add results_integration.json "
+                    "or record why tool output did not affect claims"
+                ),
+                OPTIONAL_BUNDLE_FILES["results_integration"],
+            )
+        )
+        return
+    if results_integration is None:
+        return
+    if not isinstance(results_integration, dict):
+        return
+
+    rows = results_integration.get("rows", [])
+    if not isinstance(rows, list) or not rows:
+        findings.append(
+            Finding(
+                "ERROR",
+                "RESULTS_INTEGRATION_ROWS_REQUIRED",
+                "results_integration.json must contain at least one rows[] item",
+                OPTIONAL_BUNDLE_FILES["results_integration"],
+            )
+        )
+        return
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        if not str(row.get("result_id", "")).strip():
+            findings.append(
+                Finding("ERROR", "RESULTS_INTEGRATION_ROW_MISSING_RESULT_ID", f"rows[{index}] missing result_id")
+            )
+        if not value_as_list(row.get("claim_ids")):
+            findings.append(
+                Finding("ERROR", "RESULTS_INTEGRATION_ROW_MISSING_CLAIM_IDS", f"rows[{index}] must map to claim_ids")
+            )
+        if not str(row.get("ledger_action", "")).strip():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "RESULTS_INTEGRATION_ROW_MISSING_LEDGER_ACTION",
+                    f"rows[{index}] must record ledger_action",
+                )
+            )
+
+    rows_by_claim = results_rows_by_claim(results_integration)
+    for claim in iter_claims(artifacts.get("claim_ledger")):
+        if is_tool_backed_claim(claim) and claim_id(claim) not in rows_by_claim:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "TOOL_BACKED_CLAIM_MISSING_RESULTS_ROW",
+                    f"{claim_id(claim)} is tool-backed but has no results integration row",
+                    OPTIONAL_BUNDLE_FILES["results_integration"],
+                )
+            )
+
+
+def registered_tool_ids(findings: list[Finding]) -> set[str]:
+    registry_path = Path(__file__).resolve().parents[1] / "references" / "tool-registry.json"
+    try:
+        registry = json.loads(read_text_file(registry_path))
+    except FileNotFoundError:
+        findings.append(Finding("ERROR", "TOOL_REGISTRY_JSON_MISSING", "tool-registry.json is missing", str(registry_path)))
+        return set()
+    except json.JSONDecodeError as exc:
+        findings.append(Finding("ERROR", "TOOL_REGISTRY_JSON_INVALID", f"tool-registry.json is invalid: {exc}", str(registry_path)))
+        return set()
+    tools = registry.get("tools", []) if isinstance(registry, dict) else []
+    return {str(tool.get("tool_id")).strip() for tool in tools if isinstance(tool, dict) and str(tool.get("tool_id", "")).strip()}
+
+
+def iter_tool_calls(tool_call_ledger: Any) -> list[dict[str, Any]]:
+    if isinstance(tool_call_ledger, dict) and isinstance(tool_call_ledger.get("calls"), list):
+        return [call for call in tool_call_ledger["calls"] if isinstance(call, dict)]
+    if isinstance(tool_call_ledger, list):
+        return [call for call in tool_call_ledger if isinstance(call, dict)]
+    return []
+
+
+def successful_tool_calls_by_claim(tool_call_ledger: Any) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    for call in iter_tool_calls(tool_call_ledger):
+        if str(call.get("status", "")) not in TOOL_SUCCESS_STATUS:
+            continue
+        for cid in value_as_list(call.get("affected_claim_ids")):
+            out.setdefault(cid, []).append(call)
+    return out
+
+
+def successful_tool_ids(tool_call_ledger: Any) -> set[str]:
+    return {
+        str(call.get("tool_id", "")).strip()
+        for call in iter_tool_calls(tool_call_ledger)
+        if str(call.get("status", "")) in TOOL_SUCCESS_STATUS and str(call.get("tool_id", "")).strip()
+    }
+
+
+def validate_tool_ledger_policy(
+    artifacts: dict[str, Any],
+    findings: list[Finding],
+    require_ledger: bool = False,
+) -> None:
+    tool_call_ledger = artifacts.get("tool_call_ledger")
+    claims = iter_claims(artifacts.get("claim_ledger"))
+    tool_backed_claims = [claim for claim in claims if is_tool_backed_claim(claim)]
+    final_mentions_tool = final_text_has_tool_use_wording(artifacts.get("final_text"))
+    results_integration = artifacts.get("results_integration")
+    ri_tool_use_log = (
+        results_integration.get("tool_use_log", [])
+        if isinstance(results_integration, dict) and isinstance(results_integration.get("tool_use_log", []), list)
+        else []
+    )
+    ri_used_tools = [
+        str(row.get("tool_id", "")).strip()
+        for row in ri_tool_use_log
+        if isinstance(row, dict) and (row.get("used") is True or row.get("status") == "used")
+    ]
+
+    if tool_call_ledger is None:
+        if require_ledger and (tool_backed_claims or final_mentions_tool or ri_used_tools or structured_results_integration_reasons(artifacts)):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "TOOL_CALL_LEDGER_REQUIRED",
+                    "tool_call_ledger.json is required for tool-use wording, tool-backed claims, or result integration",
+                    OPTIONAL_BUNDLE_FILES["tool_call_ledger"],
+                )
+            )
+        return
+    if not isinstance(tool_call_ledger, (dict, list)):
+        return
+
+    registry_ids = registered_tool_ids(findings)
+    calls = iter_tool_calls(tool_call_ledger)
+    success_by_claim = successful_tool_calls_by_claim(tool_call_ledger)
+    success_tool_ids = successful_tool_ids(tool_call_ledger)
+
+    for index, call in enumerate(calls):
+        tool_id = str(call.get("tool_id", "")).strip()
+        status = str(call.get("status", "")).strip()
+        if registry_ids and tool_id and tool_id not in registry_ids:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "TOOL_CALL_UNREGISTERED_TOOL",
+                    f"tool_call_ledger calls[{index}] references unregistered tool_id {tool_id}",
+                    OPTIONAL_BUNDLE_FILES["tool_call_ledger"],
+                )
+            )
+        if status in TOOL_SUCCESS_STATUS and not str(call.get("output_ref", "")).strip():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "TOOL_CALL_SUCCESS_MISSING_OUTPUT_REF",
+                    f"tool_call_ledger calls[{index}] status=success requires output_ref",
+                    OPTIONAL_BUNDLE_FILES["tool_call_ledger"],
+                )
+            )
+        if status in TOOL_NON_SUCCESS_STATUS and not str(call.get("downgrade_reason", "")).strip():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "TOOL_CALL_NON_SUCCESS_REQUIRES_DOWNGRADE_REASON",
+                    f"tool_call_ledger calls[{index}] status={status} requires downgrade_reason",
+                    OPTIONAL_BUNDLE_FILES["tool_call_ledger"],
+                )
+            )
+
+    for claim in tool_backed_claims:
+        cid = claim_id(claim)
+        if cid not in success_by_claim:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "TOOL_BACKED_CLAIM_MISSING_SUCCESSFUL_CALL",
+                    f"{cid} is tool-backed but has no successful tool call affecting the claim",
+                    OPTIONAL_BUNDLE_FILES["tool_call_ledger"],
+                )
+            )
+    if final_mentions_tool and not calls:
+        findings.append(
+            Finding(
+                "ERROR",
+                "FINAL_TOOL_USE_WORDING_WITHOUT_LEDGER_CALL",
+                "final text contains tool-use wording but tool_call_ledger.json has no calls",
+                OPTIONAL_BUNDLE_FILES["tool_call_ledger"],
+            )
+        )
+    if final_mentions_tool and calls and not success_tool_ids:
+        findings.append(
+            Finding(
+                "ERROR",
+                "FINAL_TOOL_USE_WORDING_WITHOUT_SUCCESSFUL_CALL",
+                "final text contains tool-use wording but no successful tool call is recorded",
+                OPTIONAL_BUNDLE_FILES["tool_call_ledger"],
+            )
+        )
+    for tool_id in ri_used_tools:
+        if tool_id and tool_id not in success_tool_ids:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "RESULTS_INTEGRATION_TOOL_WITHOUT_SUCCESSFUL_CALL",
+                    f"results_integration marks {tool_id} used but no successful tool call is recorded",
+                    OPTIONAL_BUNDLE_FILES["tool_call_ledger"],
+                )
+            )
+
+
+def scope_has_mismatch(scope_match: Any) -> bool:
+    if not isinstance(scope_match, dict):
+        return False
+    return any(str(value) == "mismatch" for value in scope_match.values())
+
+
+def validate_semantic_scope_policy(artifacts: dict[str, Any], findings: list[Finding]) -> None:
+    for claim in iter_claims(artifacts.get("claim_ledger")):
+        cid = claim_id(claim)
+        verdict = normalized_text(claim.get("entailment_verdict", "not_checked"))
+        allowed = str(claim.get("allowed_final_wording", "")).strip()
+        high_confidence = is_high_confidence_claim(claim)
+        if high_confidence and verdict != "supports":
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "HIGH_CONFIDENCE_REQUIRES_ENTAILMENT_SUPPORT",
+                    f"{cid} is high-confidence but entailment_verdict is {verdict or 'missing'}",
+                    "claim_ledger.json",
+                )
+            )
+        if verdict == "not_checked" and allowed:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "UNCHECKED_ENTAILMENT_CANNOT_HAVE_FINAL_WORDING",
+                    f"{cid} has allowed_final_wording but entailment_verdict is not_checked",
+                    "claim_ledger.json",
+                )
+            )
+        if scope_has_mismatch(claim.get("scope_match")) and high_confidence:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "SCOPE_MISMATCH_BLOCKS_HIGH_CONFIDENCE",
+                    f"{cid} has scope_match mismatch and cannot be high-confidence",
+                    "claim_ledger.json",
+                )
+            )
+
+
+def validate_workflow_dag_policy(artifacts: dict[str, Any], findings: list[Finding]) -> None:
+    run_state = artifacts.get("run_state")
+    workflow_dag = artifacts.get("workflow_dag")
+    if not isinstance(run_state, dict):
+        return
+    if execution_strategy(run_state) == TEAM_LEVEL_STRATEGY and workflow_dag is None:
+        findings.append(
+            Finding(
+                "ERROR",
+                "WORKFLOW_DAG_REQUIRED_FOR_TEAM_STRATEGY",
+                "team_level_selective_dag requires workflow_dag.json",
+                OPTIONAL_BUNDLE_FILES["workflow_dag"],
+            )
+        )
+        return
+    if not isinstance(workflow_dag, dict):
+        return
+    alias = str(workflow_dag.get("alias", "")).strip()
+    if alias and alias != str(run_state.get("alias", "")).strip():
+        findings.append(
+            Finding(
+                "ERROR",
+                "WORKFLOW_DAG_ALIAS_MISMATCH",
+                f"workflow_dag alias {alias!r} does not match run_state alias {run_state.get('alias')!r}",
+                OPTIONAL_BUNDLE_FILES["workflow_dag"],
+            )
+        )
+    mode = str(workflow_dag.get("mode", "")).strip()
+    run_state_mode = str(run_state.get("mode", "")).strip()
+    if mode and run_state_mode and mode != run_state_mode:
+        findings.append(
+            Finding(
+                "ERROR",
+                "WORKFLOW_DAG_MODE_MISMATCH",
+                f"workflow_dag mode {mode!r} does not match run_state mode {run_state_mode!r}",
+                OPTIONAL_BUNDLE_FILES["workflow_dag"],
+            )
+        )
+    workflow_id = str(workflow_dag.get("workflow_id", "")).strip()
+    run_state_workflow_id = str(run_state.get("workflow_dag_id", "")).strip()
+    if workflow_id and run_state_workflow_id and workflow_id != run_state_workflow_id:
+        findings.append(
+            Finding(
+                "ERROR",
+                "WORKFLOW_DAG_ID_MISMATCH",
+                (
+                    f"workflow_dag workflow_id {workflow_id!r} does not match "
+                    f"run_state workflow_dag_id {run_state_workflow_id!r}"
+                ),
+                OPTIONAL_BUNDLE_FILES["workflow_dag"],
+            )
+        )
+    stage_ids = {
+        str(stage.get("id", "")).strip()
+        for stage in run_state.get("stages", [])
+        if isinstance(stage, dict) and str(stage.get("id", "")).strip()
+    }
+    for node in workflow_dag.get("nodes", []):
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id", "")).strip()
+        if node.get("blocking") is True and node_id and node_id not in stage_ids:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "WORKFLOW_DAG_BLOCKING_NODE_MISSING_STAGE",
+                    f"blocking DAG node {node_id} must appear in run_state.stages",
+                    OPTIONAL_BUNDLE_FILES["workflow_dag"],
+                )
+            )
+
+
+def validate_full_protocol(
+    artifacts: dict[str, Any],
+    findings: list[Finding],
+    required_label: str | None = None,
+) -> None:
     run_state = artifacts.get("run_state")
     preflight = artifacts.get("preflight")
     post_write = artifacts.get("post_write_validation")
-    if FULL_LABEL not in declared_workflow_labels(artifacts):
+    if FULL_LABEL not in declared_workflow_labels(artifacts, required_label):
         return
 
-    if run_state is None:
-        findings.append(Finding("ERROR", "FULL_PROTOCOL_REQUIRES_RUN_STATE", "Full protocol requires run_state.json"))
-    if preflight is None:
-        findings.append(Finding("ERROR", "FULL_PROTOCOL_REQUIRES_PREFLIGHT", "Full protocol requires preflight.json"))
-    if post_write is None:
+    required_artifacts = {
+        "run_state": ("FULL_PROTOCOL_REQUIRES_RUN_STATE", "Full protocol requires run_state.json"),
+        "preflight": (
+            "FULL_PROTOCOL_REQUIRES_PREFLIGHT",
+            f"Full protocol requires {BUNDLE_FILES['preflight']}",
+        ),
+        "source_corpus": ("FULL_PROTOCOL_REQUIRES_SOURCE_CORPUS", "Full protocol requires source_corpus.json"),
+        "claim_ledger": ("FULL_PROTOCOL_REQUIRES_CLAIM_LEDGER", "Full protocol requires claim_ledger.json"),
+        "stage_evaluation": ("FULL_PROTOCOL_REQUIRES_STAGE_EVALUATION", "Full protocol requires stage_evaluation.json"),
+        "post_write_validation": (
+            "FULL_PROTOCOL_REQUIRES_POST_WRITE",
+            "Full protocol requires post_write_validation.json",
+        ),
+    }
+    for artifact_key, (code, message) in required_artifacts.items():
+        if artifacts.get(artifact_key) is None:
+            findings.append(Finding("ERROR", code, message, BUNDLE_FILES[artifact_key]))
+    if not str(artifacts.get("final_text") or "").strip():
         findings.append(
-            Finding("ERROR", "FULL_PROTOCOL_REQUIRES_POST_WRITE", "Full protocol requires post_write_validation.json")
+            Finding(
+                "ERROR",
+                "FULL_PROTOCOL_REQUIRES_FINAL_TEXT",
+                "Full protocol requires non-empty final.md",
+                BUNDLE_FILES["final_text"],
+            )
         )
 
     if isinstance(post_write, dict):
@@ -944,12 +1618,16 @@ def validate_full_protocol(artifacts: dict[str, Any], findings: list[Finding]) -
         )
 
 
-def validate_compact_standard_artifacts(artifacts: dict[str, Any], findings: list[Finding]) -> None:
-    if COMPACT_LABEL not in declared_workflow_labels(artifacts):
+def validate_compact_standard_artifacts(
+    artifacts: dict[str, Any],
+    findings: list[Finding],
+    required_label: str | None = None,
+) -> None:
+    if COMPACT_LABEL not in declared_workflow_labels(artifacts, required_label):
         return
 
     required = {
-        "preflight": "Compact standard workflow requires preflight.json or --preflight",
+        "preflight": f"Compact standard workflow requires {BUNDLE_FILES['preflight']} or --preflight",
         "source_corpus": "Compact standard workflow requires source_corpus.json or --source-corpus",
         "claim_ledger": "Compact standard workflow requires claim_ledger.json or --claim-ledger",
         "post_write_validation": "Compact standard workflow requires post_write_validation.json or --post-write-validation",
@@ -968,6 +1646,46 @@ def validate_compact_standard_artifacts(artifacts: dict[str, Any], findings: lis
 
 def validate_spawned_instance_policy(artifacts: dict[str, Any], findings: list[Finding]) -> None:
     run_state = artifacts.get("run_state")
+    if isinstance(run_state, dict) and "spawned_review_lanes" in run_state:
+        raw_lanes = run_state.get("spawned_review_lanes")
+        if not isinstance(raw_lanes, list):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "INVALID_SPAWNED_REVIEW_LANES",
+                    "spawned_review_lanes must be an array",
+                )
+            )
+        else:
+            for index, lane in enumerate(raw_lanes):
+                if not isinstance(lane, dict):
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "INVALID_SPAWNED_REVIEW_LANE",
+                            f"spawned_review_lanes[{index}] must be an object",
+                        )
+                    )
+                    continue
+                if lane.get("status") == "complete":
+                    role = str(lane.get("role", "")).strip()
+                    if not role:
+                        findings.append(
+                            Finding(
+                                "ERROR",
+                                "SPAWNED_LANE_MISSING_ROLE",
+                                f"complete spawned_review_lanes[{index}] must include role",
+                            )
+                        )
+                    if not str(lane.get("ledger_handoff", "")).strip():
+                        findings.append(
+                            Finding(
+                                "ERROR",
+                                "SPAWNED_LANE_MISSING_LEDGER_HANDOFF",
+                                f"complete spawned_review_lanes record for {role or index} must include ledger_handoff",
+                            )
+                        )
+
     if isinstance(run_state, dict) and "spawned_agent_instances" in run_state:
         raw_instances = run_state.get("spawned_agent_instances")
         if not isinstance(raw_instances, list):
@@ -1009,11 +1727,15 @@ def validate_spawned_instance_policy(artifacts: dict[str, Any], findings: list[F
         )
 
     known_agent_ids = registry_agent_ids(findings)
-    complete_instance_agents: set[str] = set()
+    complete_independent_instance_agents: set[str] = set()
     for instance in instances:
-        agent_id = str(instance.get("agent_id", ""))
+        agent_id = str(instance.get("agent_id", "")).strip()
         status = str(instance.get("status", ""))
+        execution_surface = str(instance.get("execution_surface", "")).strip()
+        input_scope = str(instance.get("input_scope", "")).strip()
         output_artifact = str(instance.get("output_artifact", "")).strip()
+        ledger_handoff = str(instance.get("ledger_handoff", "")).strip()
+        checks_run = instance.get("checks_run")
         if known_agent_ids and agent_id not in known_agent_ids:
             findings.append(
                 Finding(
@@ -1023,7 +1745,24 @@ def validate_spawned_instance_policy(artifacts: dict[str, Any], findings: list[F
                 )
             )
         if status == "complete":
-            complete_instance_agents.add(agent_id)
+            if execution_surface in INDEPENDENT_INSTANCE_SURFACES:
+                complete_independent_instance_agents.add(agent_id)
+            else:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "SPAWNED_INSTANCE_INVALID_EXECUTION_SURFACE",
+                        f"complete spawned instance for {agent_id} must use an independent execution_surface",
+                    )
+                )
+            if not input_scope:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "SPAWNED_INSTANCE_MISSING_INPUT_SCOPE",
+                        f"complete spawned instance for {agent_id} must record an input_scope",
+                    )
+                )
             if not output_artifact:
                 findings.append(
                     Finding(
@@ -1032,14 +1771,58 @@ def validate_spawned_instance_policy(artifacts: dict[str, Any], findings: list[F
                         f"complete spawned instance for {agent_id} must record an output_artifact",
                     )
                 )
+            else:
+                validate_local_artifact_ref_exists(
+                    artifacts,
+                    output_artifact,
+                    code="SPAWNED_INSTANCE_OUTPUT_ARTIFACT_MISSING",
+                    message=(
+                        f"complete spawned instance for {agent_id} references missing "
+                        f"output_artifact {output_artifact}"
+                    ),
+                    path_label="run_state.json",
+                    findings=findings,
+                )
+            if not isinstance(checks_run, list) or not checks_run:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "SPAWNED_INSTANCE_MISSING_CHECKS_RUN",
+                        f"complete spawned instance for {agent_id} must record non-empty checks_run",
+                    )
+                )
+            elif any(not isinstance(check, str) or not check.strip() for check in checks_run):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "SPAWNED_INSTANCE_INVALID_CHECKS_RUN",
+                        f"complete spawned instance for {agent_id} has invalid checks_run entries",
+                    )
+                )
+            if not ledger_handoff:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "SPAWNED_INSTANCE_MISSING_LEDGER_HANDOFF",
+                        f"complete spawned instance for {agent_id} must record a ledger_handoff",
+                    )
+                )
 
+    for role in find_duplicate_values(complete_roles):
+        findings.append(
+            Finding(
+                "ERROR",
+                "SPAWNED_LANE_DUPLICATE_ROLE",
+                f"spawned_review_lanes contains duplicate complete role {role}",
+            )
+        )
     for role in complete_roles:
-        if role not in complete_instance_agents:
+        if role not in complete_independent_instance_agents:
             findings.append(
                 Finding(
                     "ERROR",
                     "SPAWNED_LANE_MISSING_INSTANCE",
-                    f"spawned_review_lanes marks {role} complete but no matching complete spawned_agent_instances entry exists",
+                    f"spawned_review_lanes marks {role} complete but no matching complete independent spawned_agent_instances entry exists",
                 )
             )
 
@@ -1066,7 +1849,7 @@ def validate_omics_reviewer_spawn_policy(artifacts: dict[str, Any], findings: li
                     "WARN",
                     "OMICS_RUN_REVIEWER_SPAWN_SKIPPED_WITH_DOWNGRADE",
                     "omics run skipped spawned core reviewer with explicit runtime/privacy/user-compact downgrade rationale",
-                    "preflight.json",
+                    BUNDLE_FILES["preflight"],
                 )
             )
             return
@@ -1075,7 +1858,7 @@ def validate_omics_reviewer_spawn_policy(artifacts: dict[str, Any], findings: li
                 "ERROR",
                 "OMICS_RUN_REVIEWER_SPAWN_REQUIRED",
                 "omics run requires spawned_review_plan.allowed=true, budget>=1, and a selected core reviewer unless an explicit runtime/privacy/user-compact downgrade reason is recorded",
-                "preflight.json",
+                BUNDLE_FILES["preflight"],
             )
         )
         return
@@ -1086,7 +1869,7 @@ def validate_omics_reviewer_spawn_policy(artifacts: dict[str, Any], findings: li
                 "ERROR",
                 "OMICS_RUN_CORE_REVIEWER_REQUIRED",
                 "omics run spawned_review_plan must include at least one core reviewer: omics-code-reviewer, omics-provenance-validator, or biostats-repro-auditor",
-                "preflight.json",
+                BUNDLE_FILES["preflight"],
             )
         )
         return
@@ -1213,14 +1996,24 @@ def validate_post_write_release(artifacts: dict[str, Any], findings: list[Findin
         )
 
 
-def validate_policies(artifacts: dict[str, Any], findings: list[Finding]) -> None:
-    validate_compact_standard_artifacts(artifacts, findings)
-    validate_full_protocol(artifacts, findings)
+def validate_policies(
+    artifacts: dict[str, Any],
+    findings: list[Finding],
+    required_label: str | None = None,
+    check_tool_ledger: bool = False,
+) -> None:
+    validate_required_label(artifacts, findings, required_label)
+    validate_compact_standard_artifacts(artifacts, findings, required_label)
+    validate_full_protocol(artifacts, findings, required_label)
     validate_spawned_instance_policy(artifacts, findings)
     validate_omics_reviewer_spawn_policy(artifacts, findings)
     validate_team_dag_policy(artifacts, findings)
+    validate_workflow_dag_policy(artifacts, findings)
+    validate_results_integration_policy(artifacts, findings)
+    validate_tool_ledger_policy(artifacts, findings, require_ledger=check_tool_ledger)
     validate_s3_policy(artifacts, findings)
     validate_source_policy(artifacts, findings)
+    validate_semantic_scope_policy(artifacts, findings)
     validate_final_wording(artifacts, findings)
     validate_post_write_release(artifacts, findings)
 
@@ -1246,7 +2039,7 @@ def main() -> int:
     artifacts = load_artifacts(input_paths(args), findings)
     validate_schemas(artifacts, findings)
     validate_required_artifact_fields(artifacts, findings)
-    validate_policies(artifacts, findings)
+    validate_policies(artifacts, findings, args.require_label, args.check_tool_ledger)
     emit(findings, args.json)
     return 1 if any(finding.level == "ERROR" for finding in findings) else 0
 

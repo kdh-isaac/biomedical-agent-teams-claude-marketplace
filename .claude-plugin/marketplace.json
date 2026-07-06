@@ -1,17 +1,17 @@
 {
-  "name": "biomedical-agent-teams",
-  "owner": {
-    "name": "Donghyun Kim",
-    "url": "https://github.com/kdh-isaac"
-  },
-  "description": "Biomedical Agent Teams (BMAT) — Claude Code skill for life-science research, evidence audit, omics analysis, experiment design, translational scouting, and loop workflows. 37 agent prompts, 6 command teams, validator-backed artifact checks.",
-  "plugins": [
-    {
-      "name": "biomedical-agent-teams",
-      "source": "./biomedical-agent-teams",
-      "description": "BMAT router: 6 biomedical research teams (omics, evidence audit, experiment design, translational scout, idea discovery, research council). 37 agent prompts, no MCP dependencies.",
-      "version": "0.8.3",
-      "license": "MIT"
-    }
-  ]
+    "name":  "biomedical-agent-teams",
+    "owner":  {
+                  "name":  "Donghyun Kim",
+                  "url":  "https://github.com/kdh-isaac"
+              },
+    "description":  "Biomedical Agent Teams (BMAT) v1.0.0 for Claude Code: 36 agent prompts, 6 command teams, workflow DAGs, domain packs, results integration, tool-call ledger checks, validator-backed artifact bundles, and golden eval gates.",
+    "plugins":  [
+                    {
+                        "name":  "biomedical-agent-teams",
+                        "source":  "./biomedical-agent-teams",
+                        "description":  "BMAT router: biomedical research council, idea discovery, omics analysis, evidence audit, experiment design, and translational scouting workflows for Claude Code.",
+                        "version":  "1.0.0",
+                        "license":  "MIT"
+                    }
+                ]
 }

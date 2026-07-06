@@ -5,12 +5,17 @@ import os
 import shutil
 import subprocess
 import sys
+import importlib.util
 from pathlib import Path
+
+import pytest
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = SKILL_ROOT / "scripts" / "bmat_validate.py"
 FIXTURES = SKILL_ROOT / "tests" / "fixtures"
+PREFLIGHT_FILE = "runtime_capability_preflight.json"
+UTF8_BOM_BYTES = b"\xef\xbb\xbf"
 
 
 def run_validator(fixture_name: str) -> subprocess.CompletedProcess[str]:
@@ -43,8 +48,68 @@ def run_validator_args(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def valid_results_integration_payload() -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "integration_id": "RI-TEST-001",
+        "plugin_version": "1.0.0",
+        "source_corpus_lock": "locked",
+        "tool_use_log": [
+            {
+                "tool_id": "spawned-reviewer-lane",
+                "status": "used",
+                "used": True,
+                "source_corpus_rows": ["SC-001"],
+                "result_rows": ["RI-ROW-001"],
+                "downgrade_reason": "",
+            }
+        ],
+        "rows": [
+            {
+                "result_id": "RI-ROW-001",
+                "result_type": "literature",
+                "source_ref": "SC-001",
+                "claim_ids": ["CL-001"],
+                "status": "support",
+                "evidence_direction": "supports",
+                "confidence": "moderate",
+                "interpretation": "Public literature supports a bounded claim.",
+                "limitations": "Synthetic regression fixture.",
+                "ledger_action": "update",
+            }
+        ],
+        "final_claim_policy": "ledger-only",
+        "human_review_status": "not-needed",
+    }
+
+
+def spawnable_agent_ids() -> list[str]:
+    registry = json.loads((SKILL_ROOT / "agent-registry.json").read_text(encoding="utf-8-sig"))
+    agents = registry.get("agents", [])
+    assert isinstance(agents, list)
+    return sorted(
+        str(agent["agent_id"])
+        for agent in agents
+        if isinstance(agent, dict) and agent.get("spawnable") is True
+    )
+
+
 def combined_output(result: subprocess.CompletedProcess[str]) -> str:
     return result.stdout + result.stderr
+
+
+def load_validator_module():
+    spec = importlib.util.spec_from_file_location("bmat_validate_under_test", VALIDATOR)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def prefix_utf8_bom(path: Path) -> None:
+    path.write_bytes(UTF8_BOM_BYTES + path.read_bytes())
 
 
 def add_valid_team_dag(run_state: dict[str, object]) -> None:
@@ -93,6 +158,58 @@ def add_valid_team_dag(run_state: dict[str, object]) -> None:
     ]
 
 
+def write_spawned_output_artifact(bundle: Path, artifact_ref: str, body: str = "synthetic spawned review output\n") -> None:
+    path = bundle / artifact_ref.split("#", 1)[0]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+
+
+def write_team_output_artifacts(bundle: Path) -> None:
+    for artifact_ref in (
+        "team-outputs/idea-discovery-team.md",
+        "team-outputs/experiment-design-team.md",
+    ):
+        path = bundle / artifact_ref
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"synthetic team output: {artifact_ref}\n", encoding="utf-8")
+
+
+def write_valid_team_workflow_dag(bundle: Path) -> None:
+    workflow_dag = {
+        "workflow_id": "evidence-audit-team.audit.synthetic-team-dag",
+        "runtime": "claude-code",
+        "alias": "evidence-audit-team",
+        "mode": "audit",
+        "track": "synthetic-team-dag",
+        "nodes": [
+            {
+                "id": "S0",
+                "agent": "protocol-context-locker",
+                "outputs": ["runtime_capability_preflight"],
+                "blocking": True,
+            },
+            {
+                "id": "S1",
+                "agent": "life-science-literature-curator",
+                "requires": ["S0"],
+                "outputs": ["source_corpus"],
+                "blocking": True,
+            },
+            {
+                "id": "S3",
+                "agent": "post-write-final-validator",
+                "requires": ["S1"],
+                "outputs": ["post_write_validation"],
+                "blocking": True,
+                "spawnable": True,
+                "independence_required": True,
+            },
+        ],
+        "release_gates": ["bmat_validate", "bmat_tool_ledger_check"],
+    }
+    (bundle / "workflow_dag.json").write_text(json.dumps(workflow_dag, indent=2), encoding="utf-8")
+
+
 def make_omics_run_bundle(
     tmp_path: Path,
     *,
@@ -106,7 +223,7 @@ def make_omics_run_bundle(
     bundle = tmp_path / "omics_bundle"
     shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
 
-    preflight_path = bundle / "preflight.json"
+    preflight_path = bundle / PREFLIGHT_FILE
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     preflight["requested_alias"] = "omics-analysis-team"
     preflight["selected_mode"] = "run"
@@ -158,6 +275,133 @@ def test_valid_bundle_passes() -> None:
     result = run_validator("valid_full_protocol_bundle")
     assert result.returncode == 0, combined_output(result)
     assert "ERROR" not in result.stdout
+    assert "LEGACY_BUNDLE_ARTIFACT_NAME" not in result.stdout
+
+
+def test_legacy_preflight_alias_passes_with_warning() -> None:
+    result = run_validator("valid_legacy_preflight_bundle")
+    output = combined_output(result)
+
+    assert result.returncode == 0, output
+    assert "LEGACY_BUNDLE_ARTIFACT_NAME" in output
+    assert PREFLIGHT_FILE in output
+
+
+def test_valid_bundle_accepts_utf8_bom_prefixed_artifacts(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    for filename in (
+        "run_state.json",
+        PREFLIGHT_FILE,
+        "source_corpus.json",
+        "claim_ledger.json",
+        "stage_evaluation.json",
+        "post_write_validation.json",
+        "final.md",
+    ):
+        prefix_utf8_bom(bundle / filename)
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 0, combined_output(result)
+    assert "ERROR" not in result.stdout
+
+
+def test_results_integration_accepts_utf8_bom_prefix(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    results_integration = bundle / "results_integration.json"
+    results_integration.write_text(
+        json.dumps(valid_results_integration_payload(), indent=2),
+        encoding="utf-8",
+    )
+    prefix_utf8_bom(results_integration)
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 0, combined_output(result)
+    assert "ERROR" not in result.stdout
+
+
+def test_results_integration_artifact_schema_is_validated_when_present(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    payload = valid_results_integration_payload()
+    payload["tool_use_log"][0]["used"] = False
+    (bundle / "results_integration.json").write_text(
+        json.dumps(payload, indent=2),
+        encoding="utf-8",
+    )
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "SCHEMA_VALIDATION_FAILED" in combined_output(result)
+    assert "results_integration" in combined_output(result)
+
+
+def test_complete_reviewer_output_requires_results_integration(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    (bundle / "results_integration.json").unlink()
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "RESULTS_INTEGRATION_REQUIRED" in combined_output(result)
+
+
+def test_tool_ledger_check_requires_ledger_when_results_use_tool(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    (bundle / "tool_call_ledger.json").unlink()
+
+    result = run_validator_args("--bundle", str(bundle), "--check-tool-ledger")
+
+    assert result.returncode == 1
+    assert "TOOL_CALL_LEDGER_REQUIRED" in combined_output(result)
+
+
+def test_tool_use_wording_uses_token_boundaries_for_translational_alias() -> None:
+    module = load_validator_module()
+
+    scaffold_text = (
+        "Workflow label: Partial workflow; formal gates skipped\n\n"
+        "Scaffold for `translational-scout-team` in `audit` mode.\n\n"
+        "Do not replace this with source-backed final wording until the claim "
+        "ledger, source corpus, and post-write validation are updated."
+    )
+
+    assert module.final_text_has_tool_use_wording(scaffold_text) is False
+    assert module.final_text_has_tool_use_wording("We ran PubMed and checked NCBI.") is True
+
+
+def test_results_integration_used_tool_requires_successful_call(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    ledger_path = bundle / "tool_call_ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["calls"] = []
+    ledger_path.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
+
+    result = run_validator_args("--bundle", str(bundle), "--check-tool-ledger")
+
+    assert result.returncode == 1
+    assert "RESULTS_INTEGRATION_TOOL_WITHOUT_SUCCESSFUL_CALL" in combined_output(result)
+
+
+def test_semantic_scope_mismatch_blocks_high_confidence_claim(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    ledger_path = bundle / "claim_ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["claims"][0]["scope_match"]["species"] = "mismatch"
+    ledger_path.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "SCOPE_MISMATCH_BLOCKS_HIGH_CONFIDENCE" in combined_output(result)
 
 
 def test_full_protocol_without_independent_review_fails() -> None:
@@ -193,7 +437,7 @@ def test_compact_standard_label_requires_formal_artifacts(tmp_path: Path) -> Non
     output = combined_output(result)
     assert result.returncode == 1
     assert "COMPACT_WORKFLOW_REQUIRES_ARTIFACT" in output
-    assert "preflight.json" in output
+    assert PREFLIGHT_FILE in output
     assert "source_corpus.json" in output
     assert "claim_ledger.json" in output
     assert "post_write_validation.json" in output
@@ -210,6 +454,50 @@ def test_full_protocol_label_in_final_text_requires_run_state(tmp_path: Path) ->
     assert "FULL_PROTOCOL_REQUIRES_RUN_STATE" in output
     assert "FULL_PROTOCOL_REQUIRES_PREFLIGHT" in output
     assert "FULL_PROTOCOL_REQUIRES_POST_WRITE" in output
+
+
+def test_full_protocol_requires_complete_bundle_artifacts(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    for filename in ("source_corpus.json", "claim_ledger.json", "stage_evaluation.json", "final.md"):
+        (bundle / filename).unlink()
+
+    result = run_validator_path(bundle)
+
+    output = combined_output(result)
+    assert result.returncode == 1
+    assert "FULL_PROTOCOL_REQUIRES_SOURCE_CORPUS" in output
+    assert "FULL_PROTOCOL_REQUIRES_CLAIM_LEDGER" in output
+    assert "FULL_PROTOCOL_REQUIRES_STAGE_EVALUATION" in output
+    assert "FULL_PROTOCOL_REQUIRES_FINAL_TEXT" in output
+
+
+def test_full_protocol_missing_canonical_preflight_fails(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    (bundle / PREFLIGHT_FILE).unlink()
+
+    result = run_validator_path(bundle)
+
+    output = combined_output(result)
+    assert result.returncode == 1
+    assert "FULL_PROTOCOL_REQUIRES_PREFLIGHT" in output
+    assert PREFLIGHT_FILE in output
+
+
+def test_require_label_enforces_full_protocol_even_without_declared_label(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["final_label"] = "Partial workflow; formal gates skipped"
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_args("--bundle", str(bundle), "--require-label", "Full protocol followed")
+
+    output = combined_output(result)
+    assert result.returncode == 1
+    assert "REQUIRED_LABEL_MISMATCH" in output
 
 
 def test_negated_full_protocol_label_does_not_trigger_full_policy(tmp_path: Path) -> None:
@@ -240,6 +528,49 @@ def test_complete_spawned_review_lane_requires_actual_instance(tmp_path: Path) -
 
     assert result.returncode == 1
     assert "SPAWNED_LANE_MISSING_INSTANCE" in combined_output(result)
+
+
+@pytest.mark.parametrize("agent_id", spawnable_agent_ids())
+def test_each_spawnable_agent_instance_contract_passes_validator(tmp_path: Path, agent_id: str) -> None:
+    bundle = tmp_path / agent_id
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["spawned_review_lanes"] = [
+        {
+            "role": agent_id,
+            "status": "complete",
+            "rationale": f"{agent_id} synthetic spawned reviewer smoke check",
+            "ledger_handoff": f"{agent_id} handoff accepted into CL-001",
+        }
+    ]
+    run_state["spawned_agent_instances"] = [
+        {
+            "instance_id": f"BMAT-SPAWN-{agent_id}",
+            "agent_id": agent_id,
+            "execution_surface": "spawned_subagent",
+            "spawn_tool": "synthetic-contract-smoke",
+            "thread_or_task_id": f"synthetic-{agent_id}",
+            "parent_run_id": "run-valid-001",
+            "status": "complete",
+            "input_scope": "synthetic CL-001/S-001 full-protocol fixture",
+            "output_artifact": f"review/{agent_id}.md",
+            "checks_run": ["spawn contract smoke", "ledger handoff smoke"],
+            "ledger_handoff": f"{agent_id} handoff accepted into CL-001",
+        }
+    ]
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+    write_spawned_output_artifact(bundle, f"review/{agent_id}.md")
+
+    post_write_path = bundle / "post_write_validation.json"
+    post_write = json.loads(post_write_path.read_text(encoding="utf-8"))
+    post_write["independent_review_status"] = f"spawned_subagent {agent_id} complete"
+    post_write_path.write_text(json.dumps(post_write, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 0, combined_output(result)
+    assert "VALIDATION_PASSED" in combined_output(result)
 
 
 def test_full_protocol_requires_complete_independent_instance(tmp_path: Path) -> None:
@@ -299,6 +630,105 @@ def test_complete_spawned_instance_requires_output_artifact(tmp_path: Path) -> N
 
     assert result.returncode == 1
     assert "SPAWNED_INSTANCE_MISSING_OUTPUT_ARTIFACT" in combined_output(result)
+
+
+def test_complete_spawned_instance_requires_existing_output_artifact(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["spawned_agent_instances"][0]["output_artifact"] = "review/missing-output.md"
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "SPAWNED_INSTANCE_OUTPUT_ARTIFACT_MISSING" in combined_output(result)
+
+
+def test_complete_spawned_instance_requires_execution_evidence(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["spawned_agent_instances"][0]["input_scope"] = " "
+    run_state["spawned_agent_instances"][0]["checks_run"] = []
+    run_state["spawned_agent_instances"][0]["ledger_handoff"] = ""
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+    output = combined_output(result)
+
+    assert result.returncode == 1
+    assert "SPAWNED_INSTANCE_MISSING_INPUT_SCOPE" in output
+    assert "SPAWNED_INSTANCE_MISSING_CHECKS_RUN" in output
+    assert "SPAWNED_INSTANCE_MISSING_LEDGER_HANDOFF" in output
+
+
+def test_complete_spawned_instance_rejects_non_independent_surface(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["spawned_agent_instances"][0]["execution_surface"] = "same_model_inline"
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+    output = combined_output(result)
+
+    assert result.returncode == 1
+    assert "SPAWNED_INSTANCE_INVALID_EXECUTION_SURFACE" in output
+    assert "SPAWNED_LANE_MISSING_INSTANCE" in output
+
+
+def test_complete_spawned_review_lane_requires_ledger_handoff(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["spawned_review_lanes"][0]["ledger_handoff"] = ""
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "SPAWNED_LANE_MISSING_LEDGER_HANDOFF" in combined_output(result)
+
+
+def test_duplicate_complete_spawned_review_lane_fails(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["spawned_review_lanes"].append(dict(run_state["spawned_review_lanes"][0]))
+    run_state["spawned_agent_instances"].append(
+        {
+            **run_state["spawned_agent_instances"][0],
+            "instance_id": "BMAT-SPAWN-002",
+        }
+    )
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "SPAWNED_LANE_DUPLICATE_ROLE" in combined_output(result)
+
+
+def test_malformed_spawned_review_lanes_shape_returns_policy_error(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["spawned_review_lanes"] = {"role": "citation-verifier"}
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    output = combined_output(result)
+    assert result.returncode == 1
+    assert "INVALID_SPAWNED_REVIEW_LANES" in output
+    assert "Traceback" not in output
 
 
 def test_duplicate_spawned_instance_id_fails(tmp_path: Path) -> None:
@@ -424,6 +854,7 @@ def test_omics_run_core_reviewer_instance_passes(tmp_path: Path) -> None:
         ],
         independent_review_status="spawned_subagent omics-code-reviewer complete",
     )
+    write_spawned_output_artifact(bundle, "review/omics-code-reviewer.md")
 
     result = run_validator_path(bundle)
 
@@ -437,12 +868,68 @@ def test_valid_team_level_selective_dag_passes(tmp_path: Path) -> None:
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_workflow_dag(bundle)
+    write_team_output_artifacts(bundle)
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 
     result = run_validator_path(bundle)
 
     assert result.returncode == 0, combined_output(result)
     assert "ERROR" not in result.stdout
+
+
+def test_complete_team_output_artifact_path_must_exist(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    add_valid_team_dag(run_state)
+    write_valid_team_workflow_dag(bundle)
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "TEAM_OUTPUT_PATH_MISSING" in combined_output(result)
+
+
+def test_workflow_dag_mode_must_match_run_state(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    add_valid_team_dag(run_state)
+    write_valid_team_workflow_dag(bundle)
+    workflow_dag_path = bundle / "workflow_dag.json"
+    workflow_dag = json.loads(workflow_dag_path.read_text(encoding="utf-8"))
+    workflow_dag["mode"] = "run"
+    workflow_dag_path.write_text(json.dumps(workflow_dag, indent=2), encoding="utf-8")
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "WORKFLOW_DAG_MODE_MISMATCH" in combined_output(result)
+
+
+def test_workflow_dag_id_must_match_run_state_when_declared(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    add_valid_team_dag(run_state)
+    run_state["workflow_dag_id"] = "evidence-audit-team.audit.synthetic-team-dag"
+    write_valid_team_workflow_dag(bundle)
+    workflow_dag_path = bundle / "workflow_dag.json"
+    workflow_dag = json.loads(workflow_dag_path.read_text(encoding="utf-8"))
+    workflow_dag["workflow_id"] = "evidence-audit-team.run.synthetic-team-dag"
+    workflow_dag_path.write_text(json.dumps(workflow_dag, indent=2), encoding="utf-8")
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "WORKFLOW_DAG_ID_MISMATCH" in combined_output(result)
 
 
 def test_complete_team_spawn_lane_requires_team_output_artifact(tmp_path: Path) -> None:

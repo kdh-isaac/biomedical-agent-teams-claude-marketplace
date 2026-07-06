@@ -40,12 +40,11 @@ answer should look and behave like an audited output.
    before final writing.
 
 Use `agent-registry.json` before spawning. A reviewer must be marked
-`spawnable: true`, its `prompt_path` must point to an existing role prompt file,
-and the workflow run must record the concrete execution in `spawned_agent_instances`
-with the Agent tool `subagent_type` used (e.g., `biomedical-agent-teams:<agent-id>`
-as listed in `agent-registry.json`). A planned or completed `spawned_review_lanes`
-row without a matching instance is only a planning record and must not be used as
-proof of independent execution.
+`spawnable: true`, its `agents/*.md` template must point to an existing
+role prompt and `contracts/spawned-agent-output.schema.json`, and the workflow
+run must record the concrete execution in `spawned_agent_instances`. A planned
+or completed `spawned_review_lanes` row without a matching instance is only a
+planning record and must not be used as proof of independent execution.
 
 Do not call same-model separate-pass review independent unless a spawned
 subagent, separate model, tool-backed validator, external verifier, or human
@@ -165,10 +164,9 @@ Every spawned reviewer or spawned team must return:
 A bare "done" is not sufficient for BMAT review or team output.
 
 For reviewer subagents, the output must also satisfy
-`contracts/spawned-agent-output.schema.json`.
-Record the output artifact path and Agent tool `subagent_type` in
-`workflow-run.spawned_agent_instances` so a validator can connect the actual
-subagent execution to the final claim ledger.
+`contracts/spawned-agent-output.schema.json` plus any role-specific prompt requirements.
+Record the output artifact path in `workflow-run.spawned_agent_instances` so a
+validator can connect the actual subagent execution to the final claim ledger.
 
 For spawned command-level teams, record the formal team report in
 `workflow-run.team_output_artifacts`. Reviewer instances and team bundle

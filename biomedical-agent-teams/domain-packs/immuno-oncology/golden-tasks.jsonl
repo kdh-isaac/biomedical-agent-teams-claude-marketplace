@@ -1,0 +1,2 @@
+{"task_id":"IO-001","failure_mode":"xenograft_to_human_efficacy_overclaim","expected_detection":["species_scope_overclaim","clinical_overreach"],"expected_block":true,"tags":["semantic_scope","overclaim"]}
+{"task_id":"IO-002","failure_mode":"bulk_signature_as_cart_intrinsic_state","expected_detection":["bulk_to_cell_intrinsic_overclaim","cell_type_scope_overclaim"],"expected_block":true,"tags":["semantic_scope","omics"]}

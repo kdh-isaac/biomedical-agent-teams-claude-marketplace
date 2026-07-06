@@ -5,7 +5,7 @@ and long-running biomedical workflows.
 
 ## Purpose
 
-BMAT role prompts are usually read and applied inline by the runtime. Contract gating
+BMAT role prompts are usually read and applied inline in Claude Code. Contract gating
 is a policy target, not an automatic runtime guarantee. Without
 `scripts/bmat_validate.py`, BMAT workflows are contract-described: the lead
 preserves each role's scope, inputs, methods, findings, limitations, handoff,

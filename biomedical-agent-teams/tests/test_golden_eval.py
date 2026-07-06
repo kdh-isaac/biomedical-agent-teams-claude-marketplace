@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -8,9 +9,11 @@ from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 EVAL_SCRIPT = SKILL_ROOT / "evals" / "run_golden_eval.py"
+MODEL_EVAL_SCRIPT = SKILL_ROOT / "evals" / "run_model_golden_eval.py"
 SCHEMA_WRAPPER = SKILL_ROOT / "evals" / "validate_golden_eval_schema.py"
 TASKS = SKILL_ROOT / "evals" / "golden_tasks.jsonl"
 SAMPLE_OUTPUTS = SKILL_ROOT / "evals" / "sample_outputs.jsonl"
+UTF8_BOM_BYTES = b"\xef\xbb\xbf"
 
 
 def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
@@ -20,13 +23,17 @@ def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     )
 
 
-def run_eval(outputs: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
+def prefix_utf8_bom(src: Path, dest: Path) -> None:
+    dest.write_bytes(UTF8_BOM_BYTES + src.read_bytes())
+
+
+def run_eval_with_tasks(tasks: Path, outputs: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
             str(EVAL_SCRIPT),
             "--tasks",
-            str(TASKS),
+            str(tasks),
             "--outputs",
             str(outputs),
             *extra_args,
@@ -37,21 +44,33 @@ def run_eval(outputs: Path, *extra_args: str) -> subprocess.CompletedProcess[str
     )
 
 
+def run_eval(outputs: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
+    return run_eval_with_tasks(TASKS, outputs, *extra_args)
+
+
 def read_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def run_schema_wrapper(outputs: Path | None = None, *extra_args: str) -> subprocess.CompletedProcess[str]:
+def run_schema_wrapper_with_tasks(
+    tasks: Path,
+    outputs: Path | None = None,
+    *extra_args: str,
+) -> subprocess.CompletedProcess[str]:
     cmd = [
         sys.executable,
         str(SCHEMA_WRAPPER),
         "--tasks",
-        str(TASKS),
+        str(tasks),
         *extra_args,
     ]
     if outputs is not None:
         cmd.extend(["--outputs", str(outputs)])
     return subprocess.run(cmd, text=True, capture_output=True, check=False)
+
+
+def run_schema_wrapper(outputs: Path | None = None, *extra_args: str) -> subprocess.CompletedProcess[str]:
+    return run_schema_wrapper_with_tasks(TASKS, outputs, *extra_args)
 
 
 def sample_rows_with_task(task_id: str, **updates: object) -> list[dict[str, object]]:
@@ -68,7 +87,7 @@ def test_readme_sample_outputs_exist_and_strict_gate_passes() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
     assert payload["schema_valid"] is True
-    assert payload["task_count"] == 20
+    assert payload["task_count"] == 28
     assert payload["output_integrity_ok"] is True
     assert payload["gate"]["passed"] is True
     assert payload["missing_output_task_ids"] == []
@@ -77,6 +96,145 @@ def test_readme_sample_outputs_exist_and_strict_gate_passes() -> None:
     assert payload["pmid_drift_detection_rate"] == 1.0
     assert payload["contradiction_detection_rate"] == 1.0
     assert payload["overclaim_downgrade_rate"] == 1.0
+    assert payload["tournament_loop_detection_rate"] == 1.0
+    assert payload["tournament_ranking_detection_rate"] == 1.0
+    assert payload["claude_runtime_detection_rate"] == 1.0
+    assert payload["semantic_scope_detection_rate"] == 1.0
+    assert payload["tool_use_honesty_detection_rate"] == 1.0
+    assert payload["results_integration_detection_rate"] == 1.0
+    assert payload["artifact_bundle_detection_rate"] == 1.0
+    assert payload["independent_review_detection_rate"] == 1.0
+    assert payload["expected_block_action_rate"] == 1.0
+
+
+def test_model_golden_eval_sample_mode_generates_scoreable_outputs(tmp_path: Path) -> None:
+    outputs = tmp_path / "model_sample_outputs.jsonl"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(MODEL_EVAL_SCRIPT),
+            "--tasks",
+            str(TASKS),
+            "--alias",
+            "evidence-audit-team",
+            "--runtime",
+            "claude-code",
+            "--model",
+            "sample-model",
+            "--out",
+            str(outputs),
+            "--sample-mode",
+            "--then-score",
+            "--gate",
+        ],
+        env={**os.environ, "SHELL": "/bin/zsh"},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    rows = read_jsonl(outputs)
+    assert len(rows) == 28
+    assert rows[0]["runtime"] == "claude-code"
+    assert rows[0]["shell_family"] == "zsh"
+    assert "prompt_hash" in rows[0]
+
+
+def test_model_golden_eval_adapter_command_generates_scoreable_outputs(tmp_path: Path) -> None:
+    adapter = tmp_path / "adapter.py"
+    adapter.write_text(
+        "\n".join(
+            [
+                "import json, sys",
+                "task = json.loads(sys.stdin.read())",
+                "expected = task.get('expected_detection', [])",
+                "blocked = bool(task.get('expected_block', False))",
+                "print(json.dumps({",
+                "    'task_id': task['task_id'],",
+                "    'detected_failure_modes': expected if blocked else [],",
+                "    'blocked': blocked,",
+                "    'downgraded': blocked,",
+                "    'output_text': 'adapter smoke output',",
+                "}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    outputs = tmp_path / "model_adapter_outputs.jsonl"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(MODEL_EVAL_SCRIPT),
+            "--tasks",
+            str(TASKS),
+            "--alias",
+            "evidence-audit-team",
+            "--runtime",
+            "claude-code",
+            "--model",
+            "adapter-smoke-model",
+            "--out",
+            str(outputs),
+            "--adapter-command",
+            f"{sys.executable} {adapter}",
+            "--then-score",
+            "--gate",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    rows = read_jsonl(outputs)
+    assert len(rows) == 28
+    assert rows[0]["model_name"] == "adapter-smoke-model"
+    assert rows[0]["output_text"] == "adapter smoke output"
+
+
+def test_model_golden_eval_requires_sample_or_adapter(tmp_path: Path) -> None:
+    outputs = tmp_path / "model_outputs.jsonl"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(MODEL_EVAL_SCRIPT),
+            "--tasks",
+            str(TASKS),
+            "--out",
+            str(outputs),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Use --sample-mode for CI or provide --adapter-command" in result.stderr
+
+
+def test_model_golden_eval_rejects_malformed_adapter_output(tmp_path: Path) -> None:
+    adapter = tmp_path / "bad_adapter.py"
+    adapter.write_text("print('not json')\n", encoding="utf-8")
+    outputs = tmp_path / "model_bad_adapter_outputs.jsonl"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(MODEL_EVAL_SCRIPT),
+            "--tasks",
+            str(TASKS),
+            "--out",
+            str(outputs),
+            "--adapter-command",
+            f"{sys.executable} {adapter}",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "adapter output is not valid JSON" in result.stderr
 
 
 def test_schema_wrapper_accepts_sample_tasks_and_outputs() -> None:
@@ -86,6 +244,21 @@ def test_schema_wrapper_accepts_sample_tasks_and_outputs() -> None:
     payload = json.loads(result.stdout)
     assert payload["schema_valid"] is True
     assert payload["schema_errors"] == []
+
+
+def test_golden_eval_accepts_utf8_bom_prefixed_jsonl(tmp_path: Path) -> None:
+    tasks = tmp_path / "golden_tasks.jsonl"
+    outputs = tmp_path / "sample_outputs.jsonl"
+    prefix_utf8_bom(TASKS, tasks)
+    prefix_utf8_bom(SAMPLE_OUTPUTS, outputs)
+
+    schema_result = run_schema_wrapper_with_tasks(tasks, outputs, "--json")
+    eval_result = run_eval_with_tasks(tasks, outputs, "--strict", "--gate")
+
+    assert schema_result.returncode == 0, schema_result.stdout + schema_result.stderr
+    assert json.loads(schema_result.stdout)["schema_valid"] is True
+    assert eval_result.returncode == 0, eval_result.stdout + eval_result.stderr
+    assert json.loads(eval_result.stdout)["gate"]["passed"] is True
 
 
 def test_schema_wrapper_flags_malformed_output_shape(tmp_path: Path) -> None:
@@ -183,6 +356,75 @@ def test_gate_fails_when_overclaim_case_is_neither_detected_nor_downgraded(tmp_p
     payload = json.loads(result.stdout)
     assert payload["overclaim_downgrade_rate"] < 1.0
     assert "overclaim_downgrade_rate below threshold" in payload["gate"]["failures"]
+
+
+def test_gate_fails_when_tournament_loop_case_is_missed(tmp_path: Path) -> None:
+    outputs = tmp_path / "outputs.jsonl"
+    write_jsonl(outputs, sample_rows_with_task("GT-021", detected_failure_modes=[], downgraded=False))
+
+    result = run_eval(outputs, "--strict", "--gate")
+
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["tournament_loop_detection_rate"] < 1.0
+    assert "tournament_loop_detection_rate below threshold" in payload["gate"]["failures"]
+
+
+def test_gate_fails_when_tournament_ranking_case_is_missed(tmp_path: Path) -> None:
+    outputs = tmp_path / "outputs.jsonl"
+    write_jsonl(outputs, sample_rows_with_task("GT-022", detected_failure_modes=[], downgraded=False))
+
+    result = run_eval(outputs, "--strict", "--gate")
+
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["tournament_ranking_detection_rate"] < 1.0
+    assert "tournament_ranking_detection_rate below threshold" in payload["gate"]["failures"]
+
+
+def test_gate_fails_when_claude_runtime_case_is_missed(tmp_path: Path) -> None:
+    outputs = tmp_path / "outputs.jsonl"
+    write_jsonl(outputs, sample_rows_with_task("GT-023", detected_failure_modes=[], downgraded=False))
+
+    result = run_eval(outputs, "--strict", "--gate")
+
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["claude_runtime_detection_rate"] < 1.0
+    assert "claude_runtime_detection_rate below threshold" in payload["gate"]["failures"]
+
+
+def test_gate_fails_when_semantic_scope_case_is_missed(tmp_path: Path) -> None:
+    outputs = tmp_path / "outputs.jsonl"
+    write_jsonl(outputs, sample_rows_with_task("GT-024", detected_failure_modes=[], downgraded=False))
+
+    result = run_eval(outputs, "--strict", "--gate")
+
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["semantic_scope_detection_rate"] < 1.0
+    assert "semantic_scope_detection_rate below threshold" in payload["gate"]["failures"]
+
+
+def test_gate_fails_when_expected_block_case_detects_but_does_not_block_or_downgrade(tmp_path: Path) -> None:
+    outputs = tmp_path / "outputs.jsonl"
+    write_jsonl(
+        outputs,
+        sample_rows_with_task(
+            "GT-021",
+            detected_failure_modes=["iteration_budget_violation"],
+            blocked=False,
+            downgraded=False,
+        ),
+    )
+
+    result = run_eval(outputs, "--strict", "--gate")
+
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["tournament_loop_detection_rate"] == 1.0
+    assert payload["expected_block_action_rate"] < 1.0
+    assert "expected_block_action_rate below threshold" in payload["gate"]["failures"]
 
 
 def test_eval_reports_unknown_and_duplicate_output_task_ids(tmp_path: Path) -> None:
