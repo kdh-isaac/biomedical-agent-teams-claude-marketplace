@@ -10,6 +10,26 @@ jsonschema = pytest.importorskip("jsonschema")
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ROOT = SKILL_ROOT.parent
+
+
+def _find_marketplace_json(start: Path, max_levels: int = 3) -> Path | None:
+    """Search up to max_levels parent directories for .claude-plugin/marketplace.json.
+
+    Bounded (fixed max_levels, no globbing) so this stays cheap even when the
+    plugin is deployed inside a large shared directory such as Claude Code's
+    .remote-plugins/<plugin-id>/ layout with many sibling plugins.
+    """
+    candidate = start
+    for _ in range(max_levels):
+        marketplace_json = candidate / ".claude-plugin" / "marketplace.json"
+        if marketplace_json.exists():
+            return marketplace_json
+        if candidate.parent == candidate:
+            break
+        candidate = candidate.parent
+    return None
+
+
 BOM_SIGNATURES = (
     (b"\xff\xfe\x00\x00", "UTF-32 LE BOM"),
     (b"\x00\x00\xfe\xff", "UTF-32 BE BOM"),
@@ -35,10 +55,10 @@ def read_json(path: Path) -> dict:
 
 
 def release_text_paths() -> list[Path]:
-    paths = [
-        PLUGIN_ROOT / ".claude-plugin" / "marketplace.json",
-        SKILL_ROOT / ".claude-plugin" / "plugin.json",
-    ]
+    paths = [SKILL_ROOT / ".claude-plugin" / "plugin.json"]
+    marketplace_json = _find_marketplace_json(PLUGIN_ROOT)
+    if marketplace_json is not None:
+        paths.append(marketplace_json)
     for path in sorted(SKILL_ROOT.rglob("*")):
         if not path.is_file():
             continue
@@ -80,7 +100,16 @@ def test_version_aligned_in_primary_metadata() -> None:
     assert read_json(SKILL_ROOT / "source-manifest.json")["version"] == version
     assert read_json(SKILL_ROOT / "agent-registry.json")["version"] == version
     assert read_json(SKILL_ROOT / ".claude-plugin" / "plugin.json")["version"] == version
-    marketplace = read_json(PLUGIN_ROOT / ".claude-plugin" / "marketplace.json")
+
+    marketplace_json_path = _find_marketplace_json(PLUGIN_ROOT)
+    if marketplace_json_path is None:
+        pytest.skip(
+            "no .claude-plugin/marketplace.json found near "
+            + str(PLUGIN_ROOT)
+            + " -- not a marketplace source checkout topology; "
+            + "marketplace version-alignment check is not applicable"
+        )
+    marketplace = read_json(marketplace_json_path)
     assert marketplace["plugins"][0]["version"] == version
 
 
@@ -279,13 +308,16 @@ def test_provenance_architect_names_v1_traceability_artifacts() -> None:
 
 
 def test_user_facing_command_examples_are_cross_platform() -> None:
-    docs = [
-        PLUGIN_ROOT / "README.md",
-        PLUGIN_ROOT / "README.quickstart.md",
+    required_docs = [
         SKILL_ROOT / "SKILL.md",
         SKILL_ROOT / "README.md",
         SKILL_ROOT / "evals" / "README.md",
     ]
+    optional_docs = [
+        PLUGIN_ROOT / "README.md",
+        PLUGIN_ROOT / "README.quickstart.md",
+    ]
+    docs = required_docs + [path for path in optional_docs if path.exists()]
 
     for path in docs:
         text = path.read_text(encoding="utf-8")

@@ -15,6 +15,29 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = SKILL_ROOT / "scripts" / "bmat_validate.py"
 FIXTURES = SKILL_ROOT / "tests" / "fixtures"
 PREFLIGHT_FILE = "runtime_capability_preflight.json"
+
+
+def copytree_writable(src: Path, dst: Path) -> None:
+    """Copy a fixture tree and make the copy writable.
+
+    BUGFIX: shutil.copytree() preserves the source file's permission bits by
+    default. Every test in this module that copies a fixture bundle into a
+    tmp_path and then mutates one of the copied JSON files assumed the copy
+    would be writable. That assumption breaks whenever the fixture source
+    tree itself is read-only -- which is exactly what happens when this
+    plugin is mounted/installed read-only (observed here: fixture files
+    shipped as mode 0o500), a common situation for installed packages, some
+    CI cache mounts, and read-only container layers. Reset permissions on
+    the copy so downstream write_text()/mutation calls succeed regardless of
+    the source tree's permissions.
+    """
+    shutil.copytree(src, dst)
+    for path in dst.rglob("*"):
+        if path.is_dir():
+            os.chmod(path, 0o755)
+        else:
+            os.chmod(path, 0o644)
+    os.chmod(dst, 0o755)
 UTF8_BOM_BYTES = b"\xef\xbb\xbf"
 
 
@@ -221,7 +244,7 @@ def make_omics_run_bundle(
     independent_review_status: str = "same-model separate-pass validation",
 ) -> Path:
     bundle = tmp_path / "omics_bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
 
     preflight_path = bundle / PREFLIGHT_FILE
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
@@ -289,7 +312,7 @@ def test_legacy_preflight_alias_passes_with_warning() -> None:
 
 def test_valid_bundle_accepts_utf8_bom_prefixed_artifacts(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     for filename in (
         "run_state.json",
         PREFLIGHT_FILE,
@@ -309,7 +332,7 @@ def test_valid_bundle_accepts_utf8_bom_prefixed_artifacts(tmp_path: Path) -> Non
 
 def test_results_integration_accepts_utf8_bom_prefix(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     results_integration = bundle / "results_integration.json"
     results_integration.write_text(
         json.dumps(valid_results_integration_payload(), indent=2),
@@ -325,7 +348,7 @@ def test_results_integration_accepts_utf8_bom_prefix(tmp_path: Path) -> None:
 
 def test_results_integration_artifact_schema_is_validated_when_present(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     payload = valid_results_integration_payload()
     payload["tool_use_log"][0]["used"] = False
     (bundle / "results_integration.json").write_text(
@@ -342,7 +365,7 @@ def test_results_integration_artifact_schema_is_validated_when_present(tmp_path:
 
 def test_complete_reviewer_output_requires_results_integration(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     (bundle / "results_integration.json").unlink()
 
     result = run_validator_path(bundle)
@@ -353,7 +376,7 @@ def test_complete_reviewer_output_requires_results_integration(tmp_path: Path) -
 
 def test_tool_ledger_check_requires_ledger_when_results_use_tool(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     (bundle / "tool_call_ledger.json").unlink()
 
     result = run_validator_args("--bundle", str(bundle), "--check-tool-ledger")
@@ -378,7 +401,7 @@ def test_tool_use_wording_uses_token_boundaries_for_translational_alias() -> Non
 
 def test_results_integration_used_tool_requires_successful_call(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     ledger_path = bundle / "tool_call_ledger.json"
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     ledger["calls"] = []
@@ -392,7 +415,7 @@ def test_results_integration_used_tool_requires_successful_call(tmp_path: Path) 
 
 def test_semantic_scope_mismatch_blocks_high_confidence_claim(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     ledger_path = bundle / "claim_ledger.json"
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     ledger["claims"][0]["scope_match"]["species"] = "mismatch"
@@ -458,7 +481,7 @@ def test_full_protocol_label_in_final_text_requires_run_state(tmp_path: Path) ->
 
 def test_full_protocol_requires_complete_bundle_artifacts(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     for filename in ("source_corpus.json", "claim_ledger.json", "stage_evaluation.json", "final.md"):
         (bundle / filename).unlink()
 
@@ -474,7 +497,7 @@ def test_full_protocol_requires_complete_bundle_artifacts(tmp_path: Path) -> Non
 
 def test_full_protocol_missing_canonical_preflight_fails(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     (bundle / PREFLIGHT_FILE).unlink()
 
     result = run_validator_path(bundle)
@@ -487,7 +510,7 @@ def test_full_protocol_missing_canonical_preflight_fails(tmp_path: Path) -> None
 
 def test_require_label_enforces_full_protocol_even_without_declared_label(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["final_label"] = "Partial workflow; formal gates skipped"
@@ -518,7 +541,7 @@ def test_negated_full_protocol_label_does_not_trigger_full_policy(tmp_path: Path
 
 def test_complete_spawned_review_lane_requires_actual_instance(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state.pop("spawned_agent_instances")
@@ -533,7 +556,7 @@ def test_complete_spawned_review_lane_requires_actual_instance(tmp_path: Path) -
 @pytest.mark.parametrize("agent_id", spawnable_agent_ids())
 def test_each_spawnable_agent_instance_contract_passes_validator(tmp_path: Path, agent_id: str) -> None:
     bundle = tmp_path / agent_id
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_review_lanes"] = [
@@ -575,7 +598,7 @@ def test_each_spawnable_agent_instance_contract_passes_validator(tmp_path: Path,
 
 def test_full_protocol_requires_complete_independent_instance(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_review_lanes"] = []
@@ -590,7 +613,7 @@ def test_full_protocol_requires_complete_independent_instance(tmp_path: Path) ->
 
 def test_failed_spawned_instance_does_not_satisfy_full_protocol(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_review_lanes"] = []
@@ -606,7 +629,7 @@ def test_failed_spawned_instance_does_not_satisfy_full_protocol(tmp_path: Path) 
 
 def test_unknown_spawned_instance_agent_fails(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_agent_instances"][0]["agent_id"] = "ghost-reviewer"
@@ -620,7 +643,7 @@ def test_unknown_spawned_instance_agent_fails(tmp_path: Path) -> None:
 
 def test_complete_spawned_instance_requires_output_artifact(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_agent_instances"][0]["output_artifact"] = ""
@@ -634,7 +657,7 @@ def test_complete_spawned_instance_requires_output_artifact(tmp_path: Path) -> N
 
 def test_complete_spawned_instance_requires_existing_output_artifact(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_agent_instances"][0]["output_artifact"] = "review/missing-output.md"
@@ -648,7 +671,7 @@ def test_complete_spawned_instance_requires_existing_output_artifact(tmp_path: P
 
 def test_complete_spawned_instance_requires_execution_evidence(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_agent_instances"][0]["input_scope"] = " "
@@ -667,7 +690,7 @@ def test_complete_spawned_instance_requires_execution_evidence(tmp_path: Path) -
 
 def test_complete_spawned_instance_rejects_non_independent_surface(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_agent_instances"][0]["execution_surface"] = "same_model_inline"
@@ -683,7 +706,7 @@ def test_complete_spawned_instance_rejects_non_independent_surface(tmp_path: Pat
 
 def test_complete_spawned_review_lane_requires_ledger_handoff(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_review_lanes"][0]["ledger_handoff"] = ""
@@ -697,7 +720,7 @@ def test_complete_spawned_review_lane_requires_ledger_handoff(tmp_path: Path) ->
 
 def test_duplicate_complete_spawned_review_lane_fails(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_review_lanes"].append(dict(run_state["spawned_review_lanes"][0]))
@@ -717,7 +740,7 @@ def test_duplicate_complete_spawned_review_lane_fails(tmp_path: Path) -> None:
 
 def test_malformed_spawned_review_lanes_shape_returns_policy_error(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_review_lanes"] = {"role": "citation-verifier"}
@@ -733,7 +756,7 @@ def test_malformed_spawned_review_lanes_shape_returns_policy_error(tmp_path: Pat
 
 def test_duplicate_spawned_instance_id_fails(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_agent_instances"].append(dict(run_state["spawned_agent_instances"][0]))
@@ -747,7 +770,7 @@ def test_duplicate_spawned_instance_id_fails(tmp_path: Path) -> None:
 
 def test_malformed_spawned_instances_shape_returns_policy_error(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["spawned_agent_instances"] = {"agent_id": "citation-verifier"}
@@ -864,7 +887,7 @@ def test_omics_run_core_reviewer_instance_passes(tmp_path: Path) -> None:
 
 def test_valid_team_level_selective_dag_passes(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -880,7 +903,7 @@ def test_valid_team_level_selective_dag_passes(tmp_path: Path) -> None:
 
 def test_complete_team_output_artifact_path_must_exist(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -895,7 +918,7 @@ def test_complete_team_output_artifact_path_must_exist(tmp_path: Path) -> None:
 
 def test_workflow_dag_mode_must_match_run_state(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -914,7 +937,7 @@ def test_workflow_dag_mode_must_match_run_state(tmp_path: Path) -> None:
 
 def test_workflow_dag_id_must_match_run_state_when_declared(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -934,7 +957,7 @@ def test_workflow_dag_id_must_match_run_state_when_declared(tmp_path: Path) -> N
 
 def test_complete_team_spawn_lane_requires_team_output_artifact(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -949,7 +972,7 @@ def test_complete_team_spawn_lane_requires_team_output_artifact(tmp_path: Path) 
 
 def test_team_nested_spawn_requires_explicit_approval(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -964,7 +987,7 @@ def test_team_nested_spawn_requires_explicit_approval(tmp_path: Path) -> None:
 
 def test_team_phase_dependency_must_resolve_to_prior_complete_output(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -979,7 +1002,7 @@ def test_team_phase_dependency_must_resolve_to_prior_complete_output(tmp_path: P
 
 def test_malformed_team_output_artifacts_shape_returns_policy_error(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_state["team_output_artifacts"] = {"team": "idea-discovery-team"}
@@ -995,7 +1018,7 @@ def test_malformed_team_output_artifacts_shape_returns_policy_error(tmp_path: Pa
 
 def test_team_output_dependency_must_resolve_to_complete_artifact(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -1010,7 +1033,7 @@ def test_team_output_dependency_must_resolve_to_complete_artifact(tmp_path: Path
 
 def test_duplicate_complete_team_spawn_lane_fails(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -1025,7 +1048,7 @@ def test_duplicate_complete_team_spawn_lane_fails(tmp_path: Path) -> None:
 
 def test_duplicate_complete_team_output_key_fails(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -1043,7 +1066,7 @@ def test_duplicate_complete_team_output_key_fails(tmp_path: Path) -> None:
 
 def test_duplicate_complete_team_output_artifact_id_fails(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -1059,7 +1082,7 @@ def test_duplicate_complete_team_output_artifact_id_fails(tmp_path: Path) -> Non
 
 def test_team_output_dependency_cannot_self_reference(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -1074,7 +1097,7 @@ def test_team_output_dependency_cannot_self_reference(tmp_path: Path) -> None:
 
 def test_team_output_dependency_must_reference_prior_phase(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
@@ -1089,7 +1112,7 @@ def test_team_output_dependency_must_reference_prior_phase(tmp_path: Path) -> No
 
 def test_missing_run_state_required_field_fails_without_jsonschema(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    shutil.copytree(FIXTURES / "valid_full_protocol_bundle", bundle)
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     del run_state["final_label"]
