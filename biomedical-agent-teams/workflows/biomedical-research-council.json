@@ -15,10 +15,21 @@
                       "blocking":  true
                   },
                   {
-                      "id":  "S1_source_lock",
-                      "agent":  "life-science-literature-curator",
+                      "id":  "S1_lead_route",
+                      "agent":  "life-science-lead-scientist",
                       "requires":  [
                                        "S0_context_lock"
+                                   ],
+                      "outputs":  [
+                                      "lead_decision"
+                                  ],
+                      "blocking":  true
+                  },
+                  {
+                      "id":  "S2_source_lock",
+                      "agent":  "life-science-literature-curator",
+                      "requires":  [
+                                       "S1_lead_route"
                                    ],
                       "outputs":  [
                                       "source_corpus"
@@ -26,10 +37,10 @@
                       "blocking":  true
                   },
                   {
-                      "id":  "S2_claim_graph",
+                      "id":  "S3_claim_graph",
                       "agent":  "central-claim-ledger-evidence-graph",
                       "requires":  [
-                                       "S1_source_lock"
+                                       "S2_source_lock"
                                    ],
                       "outputs":  [
                                       "claim_ledger"
@@ -37,10 +48,10 @@
                       "blocking":  true
                   },
                   {
-                      "id":  "S3_review",
+                      "id":  "S4_review",
                       "agent":  "claim-level-evidence-verifier",
                       "requires":  [
-                                       "S2_claim_graph"
+                                       "S3_claim_graph"
                                    ],
                       "outputs":  [
                                       "results_integration"
@@ -50,10 +61,10 @@
                       "independence_required":  true
                   },
                   {
-                      "id":  "S4_write_validate",
+                      "id":  "S5_write_validate",
                       "agent":  "post-write-final-validator",
                       "requires":  [
-                                       "S3_review"
+                                       "S4_review"
                                    ],
                       "outputs":  [
                                       "post_write_validation",

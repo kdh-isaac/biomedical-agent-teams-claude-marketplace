@@ -74,7 +74,9 @@ def release_text_paths() -> list[Path]:
 def test_release_surface_files_exist() -> None:
     required_paths = [
         SKILL_ROOT / "references" / "tool-registry.md",
+        SKILL_ROOT / "contracts" / "lead-decision.schema.json",
         SKILL_ROOT / "contracts" / "results-integration.schema.json",
+        SKILL_ROOT / "templates" / "lead-decision-template.md",
         SKILL_ROOT / "templates" / "results-integration-template.md",
         SKILL_ROOT / "templates" / "research-overview-template.md",
     ]
@@ -118,10 +120,12 @@ def test_manifest_lists_release_resources() -> None:
 
     assert "tool-registry" in source_manifest["references"]
     assert "claim-ledger.schema" in source_manifest["contracts"]
+    assert "lead-decision.schema" in source_manifest["contracts"]
     assert "results-integration.schema" in source_manifest["contracts"]
     assert "tool-call-ledger.schema" in source_manifest["contracts"]
     assert "workflow-dag.schema" in source_manifest["contracts"]
     assert "results-integration-template" in source_manifest["templates"]
+    assert "lead-decision-template" in source_manifest["templates"]
     assert "research-overview-template" in source_manifest["templates"]
     assert "research-workbench-index-template" in source_manifest["templates"]
     assert "bmat_tool_ledger_check" in source_manifest["scripts"]
@@ -152,6 +156,10 @@ def test_manifest_lists_release_resources() -> None:
     )
     assert (
         "workflow-dag-schema-and-six-command-dags"
+        in source_manifest["new_in_v1_0_0"]
+    )
+    assert (
+        "lead-decision-schema-template-and-full-protocol-gate"
         in source_manifest["new_in_v1_0_0"]
     )
 
@@ -283,6 +291,7 @@ def test_research_overview_template_is_ledger_bound() -> None:
 def test_command_recipes_name_v1_release_gate_artifacts() -> None:
     required_tokens = (
         "workflow_dag.json",
+        "lead_decision.json",
         "results_integration.json",
         "tool_call_ledger.json",
         "evidence_spans[]",

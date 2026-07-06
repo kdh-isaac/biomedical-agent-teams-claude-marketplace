@@ -187,6 +187,7 @@ def export_markdown_workbench(bundle: Path, force: bool) -> Path:
         ),
         "protocol-lock.md": markdown_from_json("Protocol Lock", bundle / "run_state.json"),
         "runtime-capability-preflight.md": markdown_from_json("Runtime Capability Preflight", bundle / "runtime_capability_preflight.json"),
+        "lead-decision.md": markdown_from_json("Lead Decision", bundle / "lead_decision.json"),
         "source-corpus.md": markdown_from_json("Source Corpus", bundle / "source_corpus.json"),
         "claim-ledger.md": markdown_from_json("Claim Ledger", bundle / "claim_ledger.json"),
         "results-integration.md": markdown_from_json("Results Integration", bundle / "results_integration.json"),

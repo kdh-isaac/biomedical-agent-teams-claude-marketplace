@@ -547,6 +547,23 @@ def validate_workflow_dags(skill_root: Path, findings: list[Finding]) -> None:
                         findings.append(
                             Finding("ERROR", "WORKFLOW_DAG_DEPENDENCY_ORDER_INVALID", f"{node_id} depends on unknown or later node {dependency}", str(path))
                         )
+        if alias == "biomedical-research-council":
+            lead_nodes = [
+                node
+                for node in nodes
+                if isinstance(node, dict)
+                and node.get("agent") == "life-science-lead-scientist"
+                and "lead_decision" in node.get("outputs", [])
+            ]
+            if not lead_nodes:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "RESEARCH_COUNCIL_LEAD_ROUTE_NODE_MISSING",
+                        "biomedical-research-council workflow must include a life-science-lead-scientist lead_decision node",
+                        str(path),
+                    )
+                )
     missing = sorted(expected_aliases - seen_aliases)
     if missing:
         findings.append(

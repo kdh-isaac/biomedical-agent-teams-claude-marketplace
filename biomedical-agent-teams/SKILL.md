@@ -179,6 +179,9 @@ Use these inventory surfaces instead of expanding this router:
 - `references/tool-registry.json`: deterministic tool IDs for ledger checks.
 - `contracts/results-integration.schema.json`: source/result/claim mapping
   contract for tool, reviewer, omics, and literature outputs.
+- `contracts/lead-decision.schema.json`: lead scientist/router decision
+  contract for mode, playbook, execution strategy, selected lanes, and team DAG
+  gating.
 - `contracts/tool-call-ledger.schema.json`: successful, skipped, blocked, or
   unavailable tool-call evidence contract.
 - `contracts/workflow-dag.schema.json` and `workflows/*.json`: command-to-agent
@@ -187,6 +190,8 @@ Use these inventory surfaces instead of expanding this router:
   mode, and golden-task overlays.
 - `templates/research-overview-template.md`: ledger-bound one-page synthesis
   template for final overview outputs.
+- `templates/lead-decision-template.md`: mode-aware lead routing record for
+  standard source-backed, deep, audit, team-DAG, and full-protocol workflows.
 - `templates/research-workbench-index-template.md`: Markdown workbench export
   entrypoint for reviewer-facing artifacts.
 - `scripts/bmat_docs_list.py`: dependency-free docs inventory helper.

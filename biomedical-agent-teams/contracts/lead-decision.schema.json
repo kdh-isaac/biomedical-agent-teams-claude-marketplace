@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Biomedical Agent Teams Lead Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision_id",
+    "plugin_version",
+    "workflow_run_id",
+    "requested_alias",
+    "selected_mode",
+    "lead_agent",
+    "router_agent",
+    "selected_playbook",
+    "decision_scope",
+    "execution_strategy",
+    "mode_rule",
+    "lead_route_required",
+    "selected_lanes",
+    "skipped_lanes",
+    "spawned_review_plan",
+    "team_spawn_plan",
+    "post_team_audit_plan",
+    "label_ceiling",
+    "routing_rationale"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["1.0"] },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "plugin_version": { "type": "string", "minLength": 1 },
+    "workflow_run_id": { "type": "string", "minLength": 1 },
+    "requested_alias": { "type": "string", "minLength": 1 },
+    "selected_mode": {
+      "type": "string",
+      "enum": ["quick", "standard", "deep", "audit", "plan", "run"]
+    },
+    "lead_agent": {
+      "type": "string",
+      "enum": ["life-science-lead-scientist"]
+    },
+    "router_agent": {
+      "type": "string",
+      "enum": ["scenario-playbook-router"]
+    },
+    "selected_playbook": {
+      "type": "string",
+      "enum": [
+        "mechanism-review",
+        "public-omics-feasibility",
+        "omics-analysis",
+        "hypothesis-ranking",
+        "evidence-audit",
+        "wet-lab-validation",
+        "clinical-translation",
+        "manuscript-or-grant",
+        "general-biomedical-council",
+        "not-applicable"
+      ]
+    },
+    "decision_scope": {
+      "type": "string",
+      "minLength": 1
+    },
+    "execution_strategy": {
+      "type": "string",
+      "enum": [
+        "inline_only",
+        "inline_first_selective_review",
+        "team_level_selective_dag",
+        "user_requested_full_spawn",
+        "blocked"
+      ]
+    },
+    "mode_rule": {
+      "type": "string",
+      "enum": [
+        "quick_or_narrow_standard_optional",
+        "standard_source_backed_required",
+        "deep_required",
+        "audit_required",
+        "team_level_selective_dag_required",
+        "full_protocol_required",
+        "blocked"
+      ]
+    },
+    "lead_route_required": { "type": "boolean" },
+    "selected_lanes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lane", "purpose", "status"],
+        "properties": {
+          "lane": { "type": "string", "minLength": 1 },
+          "purpose": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["planned", "running", "complete", "skipped", "blocked", "not-applicable"]
+          }
+        }
+      }
+    },
+    "skipped_lanes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lane", "reason"],
+        "properties": {
+          "lane": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "spawned_review_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "budget", "selected_roles", "rationale"],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "budget": { "type": "integer", "minimum": 0 },
+        "selected_roles": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rationale": { "type": "string" }
+      }
+    },
+    "team_spawn_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "budget",
+        "selected_teams",
+        "dependency_graph",
+        "nested_spawn_allowed",
+        "rationale"
+      ],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "budget": { "type": "integer", "minimum": 0 },
+        "selected_teams": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "biomedical-research-council",
+              "idea-discovery-team",
+              "omics-analysis-team",
+              "evidence-audit-team",
+              "experiment-design-team",
+              "translational-scout-team"
+            ]
+          }
+        },
+        "dependency_graph": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["team", "phase", "depends_on", "purpose"],
+            "properties": {
+              "team": { "type": "string" },
+              "phase": { "type": "integer", "minimum": 0 },
+              "depends_on": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "purpose": { "type": "string" }
+            }
+          }
+        },
+        "nested_spawn_allowed": { "type": "boolean" },
+        "rationale": { "type": "string" }
+      }
+    },
+    "post_team_audit_plan": { "type": "string" },
+    "label_ceiling": {
+      "type": "string",
+      "enum": [
+        "Full protocol followed",
+        "Contract-shaped artifact bundle",
+        "Compact standard workflow",
+        "Biomedical Agent Teams-informed narrative review",
+        "Limited capability-downgraded workflow",
+        "Partial workflow; formal gates skipped",
+        "Blocked"
+      ]
+    },
+    "routing_rationale": { "type": "string", "minLength": 1 },
+    "decision_limitations": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

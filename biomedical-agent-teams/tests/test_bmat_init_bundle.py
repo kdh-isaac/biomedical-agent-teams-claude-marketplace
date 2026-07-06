@@ -73,14 +73,20 @@ def test_omics_run_scaffold_validates_with_explicit_reviewer_downgrade(tmp_path:
     )
     assert init_result.returncode == 0, init_result.stdout + init_result.stderr
     assert (bundle / PREFLIGHT_FILE).exists()
+    assert (bundle / "lead_decision.json").exists()
     assert not (bundle / "preflight.json").exists()
     preflight = json.loads((bundle / PREFLIGHT_FILE).read_text(encoding="utf-8"))
+    lead_decision = json.loads((bundle / "lead_decision.json").read_text(encoding="utf-8"))
     assert preflight["runtime_id"] == preflight["runtime_capability_preflight_id"]
     assert preflight["runtime_client"] == "claude-code"
     assert preflight["plugin_version"] == "1.0.0"
     assert preflight["python_invocation"]
     assert preflight["capabilities"]["shell_available"] == "yes"
     assert preflight["validator_cli_available"] == "yes"
+    assert lead_decision["lead_agent"] == "life-science-lead-scientist"
+    assert lead_decision["router_agent"] == "scenario-playbook-router"
+    assert lead_decision["requested_alias"] == "omics-analysis-team"
+    assert lead_decision["selected_mode"] == "run"
 
     validate_result = subprocess.run(
         [sys.executable, str(VALIDATOR), "--bundle", str(bundle)],
@@ -164,9 +170,11 @@ def test_bmat_run_dry_run_creates_dag_tool_ledger_and_workbench(tmp_path: Path) 
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert (bundle / "workflow_dag.json").exists()
+    assert (bundle / "lead_decision.json").exists()
     assert (bundle / "results_integration.json").exists()
     assert (bundle / "tool_call_ledger.json").exists()
     assert list((bundle / "reports").glob("*/index.md"))
+    assert list((bundle / "reports").glob("*/lead-decision.md"))
 
 
 def test_bmat_run_normalizes_workflow_dag_to_requested_mode(tmp_path: Path) -> None:
@@ -316,3 +324,4 @@ def test_bmat_run_all_workflow_dags_scaffold_stages_and_validate(tmp_path: Path)
         assert blocking_node_ids <= run_stage_ids
         assert (bundle / "results_integration.json").exists()
         assert (bundle / "tool_call_ledger.json").exists()
+        assert (bundle / "lead_decision.json").exists()

@@ -40,6 +40,10 @@ outputs, keep the 1.0.0 hard-gate artifacts aligned with the narrative:
 - Use `workflow_dag.json` when `execution_strategy=team_level_selective_dag`,
   when `scripts/bmat_run.py` scaffolds the run, or when the final answer claims
   a planned command-to-agent DAG.
+- Use `lead_decision.json` when standard source-backed, deep, audit,
+  `team_level_selective_dag`, or full-protocol wording depends on lead scientist
+  routing. Quick or narrow standard outputs may omit it only with a downgraded
+  label.
 - Use `results_integration.json` when literature, omics, reviewer, validator,
   tool, or human-review output changes a claim, ranking, label, or final wording.
 - Use `tool_call_ledger.json` before saying a database, external service, local

@@ -26,22 +26,27 @@ Run a lead-controlled biomedical research council. Default to Korean. Treat the 
 5. Lock external connector use with `references/connector-binding-matrix.md`
    before literature, trial, omics, pathway, protein, chemical, or repository lookup.
 6. Use `life-science-lead-scientist` and `scenario-playbook-router` to build the task graph and select the smallest useful specialist lanes.
-7. Lock the execution strategy using `references/hybrid-execution-policy.md`: default inline-first, add selective spawned review or dependency-aware team-level spawned workflows only when they materially improve review quality.
-8. If `team_level_selective_dag` is selected, run dependency-aware command-level
+7. Record that lead route in `lead_decision.json` whenever the workflow is
+   standard source-backed, deep, audit, `team_level_selective_dag`, or may
+   claim `Full protocol followed`. For quick or narrow standard answers this
+   artifact is optional, but the final label must stay below full protocol if
+   it is absent.
+8. Lock the execution strategy using `references/hybrid-execution-policy.md`: default inline-first, add selective spawned review or dependency-aware team-level spawned workflows only when they materially improve review quality.
+9. If `team_level_selective_dag` is selected, run dependency-aware command-level
    team bundles before final ledger synthesis; Phase 2 teams must wait for
    narrowed candidate claims or designs.
-9. Maintain `central-claim-ledger-evidence-graph` throughout. Specialist lanes and spawned teams must hand off atomic claims, sources/artifacts, uncertainty, and contradictions to the ledger.
-10. For `deep`, `audit`, translational, manuscript-support, generated-file, or long-running work, maintain workflow-run state and biomedical passport state using `templates/workflow-run-template.md` and `templates/biomedical-passport-template.md` or the same field order.
-11. For recurring, scheduled, monitor, watch, inbox, or triage-loop work, maintain loop state using `contracts/loop-state.schema.json` and run `scripts/bmat_loop_check.py` before release.
-12. For omics, generated-file, or long-running workflows, run S1-S5 stage evaluation and downgrade or block inference/reporting when S3 Validate does not pass.
-13. Run required audit gates before synthesis: claim boundary, causal/confounder, biostats/reproducibility, provenance, risk-of-bias/study quality, safety/ethics/privacy/dual-use, contradiction red-team, and uncertainty/evidence-to-decision.
-14. If `inline_first_selective_review` is selected, run spawned reviewer lanes
+10. Maintain `central-claim-ledger-evidence-graph` throughout. Specialist lanes and spawned teams must hand off atomic claims, sources/artifacts, uncertainty, and contradictions to the ledger.
+11. For `deep`, `audit`, translational, manuscript-support, generated-file, or long-running work, maintain workflow-run state and biomedical passport state using `templates/workflow-run-template.md` and `templates/biomedical-passport-template.md` or the same field order.
+12. For recurring, scheduled, monitor, watch, inbox, or triage-loop work, maintain loop state using `contracts/loop-state.schema.json` and run `scripts/bmat_loop_check.py` before release.
+13. For omics, generated-file, or long-running workflows, run S1-S5 stage evaluation and downgrade or block inference/reporting when S3 Validate does not pass.
+14. Run required audit gates before synthesis: claim boundary, causal/confounder, biostats/reproducibility, provenance, risk-of-bias/study quality, safety/ethics/privacy/dual-use, contradiction red-team, and uncertainty/evidence-to-decision.
+15. If `inline_first_selective_review` is selected, run spawned reviewer lanes
     after ledger claims exist and merge accepted reviewer findings back to the
     ledger.
-15. Run pre-synthesis `claim-level-evidence-verifier` and `citation-verifier`.
-16. `scientific-writer-citation-agent` may use only verified claim-ledger material.
-17. Apply `references/independent-review-policy.md` before using independent-review wording.
-18. Run the integrity gate and `post-write-final-validator` before final output for high-confidence source-backed deliverables.
+16. Run pre-synthesis `claim-level-evidence-verifier` and `citation-verifier`.
+17. `scientific-writer-citation-agent` may use only verified claim-ledger material.
+18. Apply `references/independent-review-policy.md` before using independent-review wording.
+19. Run the integrity gate and `post-write-final-validator` before final output for high-confidence source-backed deliverables.
 
 ## Current Label and Artifact Gate
 
@@ -53,9 +58,10 @@ Use the label ceiling below before final writing:
 - Use `Compact standard workflow` only when preflight, source corpus, claim
   ledger, and post-write validation exist inline or as local artifacts.
 - Use `Full protocol followed` only when a complete artifact bundle exists,
-  mandatory gates pass or pass with caveats, `scripts/bmat_validate.py` passes,
-  and independent review is backed by a valid spawned, separate-model,
-  tool-backed, external, human, or tool-corroborated review surface.
+  `lead_decision.json` proves the lead route, mandatory gates pass or pass with
+  caveats, `scripts/bmat_validate.py` passes, and independent review is backed
+  by a valid spawned, separate-model, tool-backed, external, human, or
+  tool-corroborated review surface.
 - For one-off research questions, loop status is `not-applicable`; do not report
   a missing `loop_state.json` as a loop failure unless the user requested a
   watch, recurring monitor, inbox, or triage loop.
@@ -102,6 +108,11 @@ outputs, keep the 1.0.0 hard-gate artifacts aligned with the narrative:
 - Use `workflow_dag.json` when `execution_strategy=team_level_selective_dag`,
   when `scripts/bmat_run.py` scaffolds the run, or when the final answer claims
   a planned command-to-agent DAG.
+- Use `lead_decision.json` when standard source-backed, deep, audit,
+  `team_level_selective_dag`, or full-protocol wording depends on lead scientist
+  routing. It must record `selected_playbook`, `execution_strategy`,
+  `mode_rule`, selected/skipped lanes, `spawned_review_plan`,
+  `team_spawn_plan`, and `post_team_audit_plan`.
 - Use `results_integration.json` when literature, omics, reviewer, validator,
   tool, or human-review output changes a claim, ranking, label, or final wording.
 - Use `tool_call_ledger.json` before saying a database, external service, local
@@ -263,12 +274,12 @@ Final workflow label must be one of:
 - `Partial workflow; formal gates skipped`
 - `Blocked`
 
-Use `Full protocol followed` only when mandatory artifacts exist, required
-gates pass or pass with caveats, post-write validation is not blocked, and the
-workflow has a spawned, separate-model, tool-backed, external, human, or
-tool-corroborated review surface. When `scripts/bmat_validate.py` was not run
-against a complete artifact bundle, downgrade to the strongest supported
-non-full workflow label.
+Use `Full protocol followed` only when mandatory artifacts exist,
+`lead_decision.json` proves the lead scientist route, required gates pass or
+pass with caveats, post-write validation is not blocked, and the workflow has a
+spawned, separate-model, tool-backed, external, human, or tool-corroborated
+review surface. When `scripts/bmat_validate.py` was not run against a complete
+artifact bundle, downgrade to the strongest supported non-full workflow label.
 
 ## Post-Write Self-Check
 
@@ -280,20 +291,22 @@ Before final release, answer yes/no internally or visibly:
 4. Was entity normalization completed before source expansion?
 5. Was source corpus locked for source-backed claims?
 6. Was lane selection by lead/router recorded?
-7. Was a central claim ledger maintained before writing?
-8. Were S1-S5 stage checks performed when relevant?
-9. Were claim-level evidence and citation checks performed before synthesis?
-10. Did final writing use only ledger-approved material?
-11. Was independent-review wording used only when justified?
-12. Did `post-write-final-validator` run?
-13. Are skipped gates explicitly listed?
-14. Was workflow-run state and biomedical passport state produced when required?
-15. Did the integrity gate check BMAT-specific failure modes when required?
-16. Is the final workflow label accurate?
-17. Was execution strategy recorded and justified?
-18. If spawned reviewers or teams were used, did each return a formal output and
+7. If the workflow is standard source-backed, deep, audit, team-DAG, or full
+   protocol, was `lead_decision.json` produced and aligned with `run_state`?
+8. Was a central claim ledger maintained before writing?
+9. Were S1-S5 stage checks performed when relevant?
+10. Were claim-level evidence and citation checks performed before synthesis?
+11. Did final writing use only ledger-approved material?
+12. Was independent-review wording used only when justified?
+13. Did `post-write-final-validator` run?
+14. Are skipped gates explicitly listed?
+15. Was workflow-run state and biomedical passport state produced when required?
+16. Did the integrity gate check BMAT-specific failure modes when required?
+17. Is the final workflow label accurate?
+18. Was execution strategy recorded and justified?
+19. If spawned reviewers or teams were used, did each return a formal output and
     did the lead map accepted findings back to the central claim ledger?
-19. If broad spawning was requested, was all-role/team spawning avoidance or
+20. If broad spawning was requested, was all-role/team spawning avoidance or
     nested-spawn authorization documented?
 
 If any answer is "no", downgrade the final workflow label and avoid claiming

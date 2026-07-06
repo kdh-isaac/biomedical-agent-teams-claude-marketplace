@@ -8,17 +8,18 @@ BMAT for Claude Code v1.0.0 is a lightweight biomedical workflow router with val
 |---|---:|
 | Command teams | 6 |
 | Role prompts | 36 |
-| JSON contracts | 17 |
-| Templates | 15 |
-| References | 11 |
+| JSON contracts | 18 |
+| Templates | 16 |
+| References | 10 |
 | Workflow DAGs | 6 |
-| Domain packs | 2 |
-| Golden tasks | 24 |
+| Domain packs | 3 |
+| Golden tasks | 28 |
 
 ## Key v1.0 Contracts
 
 - `runtime_capability_preflight.json` is the canonical runtime preflight artifact; `preflight.json` is a legacy alias only.
-- `Full protocol followed` requires a complete artifact bundle, passing validator, and an independent/tool-backed/human review surface where required.
+- `lead_decision.json` records the lead scientist/router decision; it is required for standard source-backed, deep, audit, team-DAG, and full-protocol workflows.
+- `Full protocol followed` requires a complete artifact bundle, passing validator, lead decision evidence, and an independent/tool-backed/human review surface where required.
 - Tool, reviewer, omics, or literature results that change claims, rankings, or release labels must be represented in `results_integration.json`.
 - Tool-use claims require `tool_call_ledger.json`; unsupported tool-use claims block release labels.
 - Workflow execution plans are represented by `workflows/*.json`.

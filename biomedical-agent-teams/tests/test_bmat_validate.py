@@ -233,6 +233,55 @@ def write_valid_team_workflow_dag(bundle: Path) -> None:
     (bundle / "workflow_dag.json").write_text(json.dumps(workflow_dag, indent=2), encoding="utf-8")
 
 
+def write_valid_team_lead_decision(bundle: Path) -> None:
+    team_spawn_plan = {
+        "allowed": True,
+        "budget": 2,
+        "selected_teams": ["idea-discovery-team", "experiment-design-team"],
+        "dependency_graph": [
+            {
+                "team": "idea-discovery-team",
+                "phase": 1,
+                "depends_on": [],
+                "purpose": "candidate hypothesis generation",
+            },
+            {
+                "team": "experiment-design-team",
+                "phase": 2,
+                "depends_on": ["idea-discovery-team"],
+                "purpose": "validation design for narrowed candidate",
+            },
+        ],
+        "nested_spawn_allowed": False,
+        "rationale": "synthetic team-level DAG fixture",
+    }
+    preflight_path = bundle / PREFLIGHT_FILE
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["execution_strategy"] = "team_level_selective_dag"
+    preflight["team_spawn_plan"] = team_spawn_plan
+    preflight_path.write_text(json.dumps(preflight, indent=2), encoding="utf-8")
+
+    lead_decision = json.loads((bundle / "lead_decision.json").read_text(encoding="utf-8"))
+    lead_decision["execution_strategy"] = "team_level_selective_dag"
+    lead_decision["mode_rule"] = "team_level_selective_dag_required"
+    lead_decision["lead_route_required"] = True
+    lead_decision["selected_lanes"] = [
+        {
+            "lane": "idea-discovery-team",
+            "purpose": "candidate hypothesis generation",
+            "status": "complete",
+        },
+        {
+            "lane": "experiment-design-team",
+            "purpose": "validation design for narrowed candidate",
+            "status": "complete",
+        },
+    ]
+    lead_decision["team_spawn_plan"] = team_spawn_plan
+    lead_decision["routing_rationale"] = "Synthetic team-level DAG fixture requires lead-selected command teams."
+    (bundle / "lead_decision.json").write_text(json.dumps(lead_decision, indent=2), encoding="utf-8")
+
+
 def make_omics_run_bundle(
     tmp_path: Path,
     *,
@@ -273,12 +322,37 @@ def make_omics_run_bundle(
     run_state["run_id"] = "omics-run-fixture"
     run_state["alias"] = "omics-analysis-team"
     run_state["mode"] = "run"
+    run_state["lead_decision_id"] = "lead-omics-run-fixture"
     run_state["execution_strategy"] = "inline_first_selective_review"
     run_state["spawned_review_lanes"] = spawned_review_lanes or []
     run_state["spawned_agent_instances"] = spawned_agent_instances or []
     run_state["final_label"] = "Compact standard workflow"
     run_state["downgrade_reasons"] = downgrade_reasons or []
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+
+    lead_decision_path = bundle / "lead_decision.json"
+    lead_decision = json.loads(lead_decision_path.read_text(encoding="utf-8"))
+    lead_decision["decision_id"] = "lead-omics-run-fixture"
+    lead_decision["workflow_run_id"] = "omics-run-fixture"
+    lead_decision["requested_alias"] = "omics-analysis-team"
+    lead_decision["selected_mode"] = "run"
+    lead_decision["selected_playbook"] = "omics-analysis"
+    lead_decision["decision_scope"] = "synthetic omics run fixture"
+    lead_decision["execution_strategy"] = "inline_first_selective_review"
+    lead_decision["mode_rule"] = "quick_or_narrow_standard_optional"
+    lead_decision["lead_route_required"] = False
+    lead_decision["selected_lanes"] = [
+        {
+            "lane": "omics-analysis-team",
+            "purpose": "synthetic omics run reviewer-spawn policy",
+            "status": "planned",
+        }
+    ]
+    lead_decision["spawned_review_plan"] = spawned_review_plan
+    lead_decision["team_spawn_plan"] = preflight["team_spawn_plan"]
+    lead_decision["label_ceiling"] = "Compact standard workflow"
+    lead_decision["routing_rationale"] = "Synthetic omics run fixture for reviewer-spawn policy."
+    lead_decision_path.write_text(json.dumps(lead_decision, indent=2), encoding="utf-8")
 
     post_write_path = bundle / "post_write_validation.json"
     post_write = json.loads(post_write_path.read_text(encoding="utf-8"))
@@ -493,6 +567,33 @@ def test_full_protocol_requires_complete_bundle_artifacts(tmp_path: Path) -> Non
     assert "FULL_PROTOCOL_REQUIRES_CLAIM_LEDGER" in output
     assert "FULL_PROTOCOL_REQUIRES_STAGE_EVALUATION" in output
     assert "FULL_PROTOCOL_REQUIRES_FINAL_TEXT" in output
+
+
+def test_full_protocol_requires_lead_decision_artifact(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
+    (bundle / "lead_decision.json").unlink()
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "FULL_PROTOCOL_REQUIRES_LEAD_DECISION" in combined_output(result)
+
+
+def test_audit_mode_requires_lead_decision_even_below_full_label(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
+    (bundle / "lead_decision.json").unlink()
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_state["final_label"] = "Compact standard workflow"
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+    (bundle / "final.md").write_text("Final workflow label: Compact standard workflow\n", encoding="utf-8")
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "LEAD_DECISION_REQUIRED_FOR_MODE" in combined_output(result)
 
 
 def test_full_protocol_missing_canonical_preflight_fails(tmp_path: Path) -> None:
@@ -892,6 +993,7 @@ def test_valid_team_level_selective_dag_passes(tmp_path: Path) -> None:
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
     write_valid_team_workflow_dag(bundle)
+    write_valid_team_lead_decision(bundle)
     write_team_output_artifacts(bundle)
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 
@@ -901,6 +1003,23 @@ def test_valid_team_level_selective_dag_passes(tmp_path: Path) -> None:
     assert "ERROR" not in result.stdout
 
 
+def test_team_level_selective_dag_requires_lead_decision(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
+    run_state_path = bundle / "run_state.json"
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    add_valid_team_dag(run_state)
+    write_valid_team_workflow_dag(bundle)
+    write_team_output_artifacts(bundle)
+    run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
+    (bundle / "lead_decision.json").unlink()
+
+    result = run_validator_path(bundle)
+
+    assert result.returncode == 1
+    assert "TEAM_DAG_REQUIRES_LEAD_DECISION" in combined_output(result)
+
+
 def test_complete_team_output_artifact_path_must_exist(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)
@@ -908,6 +1027,7 @@ def test_complete_team_output_artifact_path_must_exist(tmp_path: Path) -> None:
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
     write_valid_team_workflow_dag(bundle)
+    write_valid_team_lead_decision(bundle)
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 
     result = run_validator_path(bundle)
@@ -922,6 +1042,7 @@ def test_workflow_dag_mode_must_match_run_state(tmp_path: Path) -> None:
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     write_valid_team_workflow_dag(bundle)
     workflow_dag_path = bundle / "workflow_dag.json"
     workflow_dag = json.loads(workflow_dag_path.read_text(encoding="utf-8"))
@@ -941,6 +1062,7 @@ def test_workflow_dag_id_must_match_run_state_when_declared(tmp_path: Path) -> N
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     run_state["workflow_dag_id"] = "evidence-audit-team.audit.synthetic-team-dag"
     write_valid_team_workflow_dag(bundle)
     workflow_dag_path = bundle / "workflow_dag.json"
@@ -961,6 +1083,7 @@ def test_complete_team_spawn_lane_requires_team_output_artifact(tmp_path: Path) 
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     run_state["team_output_artifacts"] = run_state["team_output_artifacts"][:1]
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 
@@ -976,6 +1099,7 @@ def test_team_nested_spawn_requires_explicit_approval(tmp_path: Path) -> None:
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     run_state["team_spawn_lanes"][0]["nested_spawn_used"] = True
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 
@@ -991,6 +1115,7 @@ def test_team_phase_dependency_must_resolve_to_prior_complete_output(tmp_path: P
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     run_state["team_spawn_lanes"][1]["depends_on"] = ["missing-team"]
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 
@@ -1022,6 +1147,7 @@ def test_team_output_dependency_must_resolve_to_complete_artifact(tmp_path: Path
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     run_state["team_output_artifacts"][1]["depends_on_outputs"] = ["missing-output"]
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 
@@ -1037,6 +1163,7 @@ def test_duplicate_complete_team_spawn_lane_fails(tmp_path: Path) -> None:
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     run_state["team_spawn_lanes"].append(dict(run_state["team_spawn_lanes"][0]))
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 
@@ -1052,6 +1179,7 @@ def test_duplicate_complete_team_output_key_fails(tmp_path: Path) -> None:
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     duplicate_output = dict(run_state["team_output_artifacts"][0])
     duplicate_output["artifact_id"] = "TEAM-IDEA-DUPLICATE"
     duplicate_output["path"] = "team-outputs/idea-discovery-team-duplicate.md"
@@ -1070,6 +1198,7 @@ def test_duplicate_complete_team_output_artifact_id_fails(tmp_path: Path) -> Non
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     run_state["team_output_artifacts"][1]["artifact_id"] = "TEAM-IDEA-001"
     run_state["team_output_artifacts"][1]["depends_on_outputs"] = []
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
@@ -1086,6 +1215,7 @@ def test_team_output_dependency_cannot_self_reference(tmp_path: Path) -> None:
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     run_state["team_output_artifacts"][1]["depends_on_outputs"] = ["TEAM-EXPERIMENT-001"]
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 
@@ -1101,6 +1231,7 @@ def test_team_output_dependency_must_reference_prior_phase(tmp_path: Path) -> No
     run_state_path = bundle / "run_state.json"
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     add_valid_team_dag(run_state)
+    write_valid_team_lead_decision(bundle)
     run_state["team_output_artifacts"][0]["depends_on_outputs"] = ["TEAM-EXPERIMENT-001"]
     run_state_path.write_text(json.dumps(run_state, indent=2), encoding="utf-8")
 

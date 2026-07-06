@@ -30,6 +30,7 @@ MODES = ("quick", "standard", "deep", "audit", "plan", "run")
 BUNDLE_FILES = (
     "runtime_capability_preflight.json",
     "run_state.json",
+    "lead_decision.json",
     "source_corpus.json",
     "claim_ledger.json",
     "stage_evaluation.json",
@@ -101,6 +102,37 @@ def scaffold_review_skip_reason(workflow: str, mode: str) -> str:
             "compact inline-only downgrade recorded until a core omics reviewer is completed"
         )
     return "scaffold default; fill during workflow execution"
+
+
+def lead_decision_mode_rule(mode: str, source_backed: bool, team_level: bool, full_protocol: bool) -> str:
+    if full_protocol:
+        return "full_protocol_required"
+    if team_level:
+        return "team_level_selective_dag_required"
+    if mode == "audit":
+        return "audit_required"
+    if mode == "deep":
+        return "deep_required"
+    if mode == "standard" and source_backed:
+        return "standard_source_backed_required"
+    if mode == "quick" or mode == "standard":
+        return "quick_or_narrow_standard_optional"
+    return "quick_or_narrow_standard_optional"
+
+
+def lead_route_required_for_mode(mode: str, source_backed: bool, team_level: bool, full_protocol: bool) -> bool:
+    return lead_decision_mode_rule(mode, source_backed, team_level, full_protocol) != "quick_or_narrow_standard_optional"
+
+
+def default_playbook(workflow: str) -> str:
+    return {
+        "biomedical-research-council": "general-biomedical-council",
+        "idea-discovery-team": "hypothesis-ranking",
+        "omics-analysis-team": "omics-analysis",
+        "evidence-audit-team": "evidence-audit",
+        "experiment-design-team": "wet-lab-validation",
+        "translational-scout-team": "clinical-translation",
+    }.get(workflow, "not-applicable")
 
 
 def utc_now() -> tuple[str, str]:
@@ -252,6 +284,7 @@ def build_payloads(
         "alias": workflow,
         "mode": mode,
         "plugin_version": version,
+        "lead_decision_id": f"lead-{run_id}",
         "execution_strategy": "inline_only",
         "nested_spawn_allowed": False,
         "spawned_review_lanes": [],
@@ -277,6 +310,40 @@ def build_payloads(
             "scaffold created before evidence collection, review, and validation",
             review_skip_reason,
         ],
+    }
+
+    mode_rule = lead_decision_mode_rule(mode, source_backed=False, team_level=False, full_protocol=False)
+    lead_decision = {
+        "schema_version": "1.0",
+        "decision_id": f"lead-{run_id}",
+        "plugin_version": version,
+        "workflow_run_id": run_id,
+        "requested_alias": workflow,
+        "selected_mode": mode,
+        "lead_agent": "life-science-lead-scientist",
+        "router_agent": "scenario-playbook-router",
+        "selected_playbook": default_playbook(workflow),
+        "decision_scope": topic,
+        "execution_strategy": "inline_only",
+        "mode_rule": mode_rule,
+        "lead_route_required": lead_route_required_for_mode(mode, source_backed=False, team_level=False, full_protocol=False),
+        "selected_lanes": [
+            {
+                "lane": workflow,
+                "purpose": "scaffold selected alias; refine during lead route",
+                "status": "planned",
+            }
+        ],
+        "skipped_lanes": [],
+        "spawned_review_plan": preflight["spawned_review_plan"],
+        "team_spawn_plan": preflight["team_spawn_plan"],
+        "post_team_audit_plan": preflight["post_team_audit_plan"],
+        "label_ceiling": "Partial workflow; formal gates skipped",
+        "routing_rationale": (
+            "Scaffold lead route only. Quick or narrow standard workflows may keep this optional; "
+            "standard source-backed, deep, audit, team-DAG, and Full protocol workflows must update it."
+        ),
+        "decision_limitations": ["scaffold placeholder; update before source-backed or high-confidence release"],
     }
 
     source_corpus = {
@@ -348,7 +415,8 @@ def build_payloads(
         "2. Fill `source_corpus.json` with stable PMID/DOI/accession/NCT/local artifact IDs.\n"
         "3. Add atomic claims to `claim_ledger.json`; final prose should use only allowed wording.\n"
         "4. Update `stage_evaluation.json` and `run_state.json` as gates pass or block.\n"
-        "5. Run the BMAT validator with the plugin script path, not a bundle-local `scripts/` directory:\n"
+        "5. Update `lead_decision.json` when standard source-backed, deep, audit, team-DAG, or full-protocol routing is used.\n"
+        "6. Run the BMAT validator with the plugin script path, not a bundle-local `scripts/` directory:\n"
         f"   `{validator_command}`\n"
         "   Re-run this command before using a high-confidence workflow label.\n"
     )
@@ -356,6 +424,7 @@ def build_payloads(
     return {
         "runtime_capability_preflight.json": preflight,
         "run_state.json": run_state,
+        "lead_decision.json": lead_decision,
         "source_corpus.json": source_corpus,
         "claim_ledger.json": claim_ledger,
         "stage_evaluation.json": stage_evaluation,

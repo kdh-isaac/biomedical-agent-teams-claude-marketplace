@@ -14,4 +14,4 @@ python biomedical-agent-teams/scripts/bmat_run.py --alias evidence-audit-team --
 python biomedical-agent-teams/scripts/bmat_export_workbench.py --bundle runs/example-audit --format markdown --out runs/example-workbench.md --force
 ```
 
-Use `runtime_capability_preflight.json` as the canonical preflight artifact. `preflight.json` is accepted only as a legacy alias.
+Use `runtime_capability_preflight.json` as the canonical preflight artifact. `preflight.json` is accepted only as a legacy alias. For standard source-backed, deep, audit, team-DAG, or full-protocol workflows, update `lead_decision.json` before final release.

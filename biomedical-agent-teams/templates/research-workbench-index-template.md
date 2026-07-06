@@ -17,13 +17,14 @@ summary: Markdown workbench index for BMAT bundle exports.
 
 1. `protocol-lock.md`
 2. `runtime-capability-preflight.md`
-3. `source-corpus.md`
-4. `claim-ledger.md`
-5. `results-integration.md`
-6. `reviewer-objections.md`
-7. `allowed-final-wording.md`
-8. `downgrade-reasons.md`
-9. `next-experiment-gates.md`
+3. `lead-decision.md`
+4. `source-corpus.md`
+5. `claim-ledger.md`
+6. `results-integration.md`
+7. `reviewer-objections.md`
+8. `allowed-final-wording.md`
+9. `downgrade-reasons.md`
+10. `next-experiment-gates.md`
 
 ## Rule
 

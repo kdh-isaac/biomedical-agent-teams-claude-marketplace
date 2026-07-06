@@ -25,6 +25,7 @@
     },
     "plugin_version": { "type": "string" },
     "workflow_dag_id": { "type": "string" },
+    "lead_decision_id": { "type": "string" },
     "domain_pack": { "type": "string" },
     "domain_pack_version": { "type": "string" },
     "results_integration_required": { "type": "boolean" },

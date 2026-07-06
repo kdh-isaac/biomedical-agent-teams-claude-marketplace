@@ -37,6 +37,7 @@ BUNDLE_FILE_ALIASES = {
 }
 
 OPTIONAL_BUNDLE_FILES = {
+    "lead_decision": "lead_decision.json",
     "results_integration": "results_integration.json",
     "tool_call_ledger": "tool_call_ledger.json",
     "workflow_dag": "workflow_dag.json",
@@ -49,6 +50,7 @@ SCHEMA_FILES = {
     "preflight": "preflight-contract.schema.json",
     "source_corpus": "source-corpus.schema.json",
     "claim_ledger": "claim-ledger.schema.json",
+    "lead_decision": "lead-decision.schema.json",
     "results_integration": "results-integration.schema.json",
     "tool_call_ledger": "tool-call-ledger.schema.json",
     "workflow_dag": "workflow-dag.schema.json",
@@ -197,6 +199,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--claim-ledger", type=Path)
     parser.add_argument("--stage-evaluation", type=Path)
     parser.add_argument("--post-write-validation", type=Path)
+    parser.add_argument("--lead-decision", type=Path)
     parser.add_argument("--results-integration", type=Path)
     parser.add_argument("--tool-call-ledger", type=Path)
     parser.add_argument("--workflow-dag", type=Path)
@@ -477,6 +480,204 @@ def execution_strategy(run_state: Any) -> str:
     if isinstance(run_state, dict):
         return str(run_state.get("execution_strategy", ""))
     return ""
+
+
+def selected_mode(preflight: Any, run_state: Any) -> str:
+    if isinstance(preflight, dict) and str(preflight.get("selected_mode", "")).strip():
+        return str(preflight.get("selected_mode", "")).strip()
+    return run_mode(run_state).strip()
+
+
+def requested_alias(preflight: Any, run_state: Any) -> str:
+    if isinstance(preflight, dict) and str(preflight.get("requested_alias", "")).strip():
+        return str(preflight.get("requested_alias", "")).strip()
+    if isinstance(run_state, dict):
+        return str(run_state.get("alias", "")).strip()
+    return ""
+
+
+def source_backed_scope(artifacts: dict[str, Any]) -> bool:
+    preflight = artifacts.get("preflight")
+    if isinstance(preflight, dict):
+        evidence_scope = preflight.get("evidence_scope")
+        if isinstance(evidence_scope, dict):
+            source_types = evidence_scope.get("source_types")
+            if isinstance(source_types, list) and any(str(item).strip() for item in source_types):
+                return True
+
+    source_corpus = artifacts.get("source_corpus")
+    if isinstance(source_corpus, dict):
+        for source in source_corpus.get("sources", []):
+            if isinstance(source, dict) and str(source.get("inclusion_status", "")).strip() in {"included", "included-with-caveats"}:
+                return True
+
+    claim_ledger = artifacts.get("claim_ledger")
+    if isinstance(claim_ledger, dict):
+        for claim in claim_ledger.get("claims", []):
+            if not isinstance(claim, dict):
+                continue
+            if claim.get("source_backed") is True:
+                return True
+            if str(claim.get("claim_type", "")).strip() == "source-backed":
+                return True
+            evidence_items = claim.get("evidence_items")
+            if isinstance(evidence_items, list) and any(str(item).strip() for item in evidence_items):
+                return True
+            evidence_edges = claim.get("evidence_edges")
+            if isinstance(evidence_edges, list) and evidence_edges:
+                return True
+    return False
+
+
+def lead_decision_required_reason(artifacts: dict[str, Any], required_label: str | None = None) -> str | None:
+    run_state = artifacts.get("run_state")
+    preflight = artifacts.get("preflight")
+    mode = selected_mode(preflight, run_state)
+    strategy = execution_strategy(run_state)
+    if strategy == TEAM_LEVEL_STRATEGY:
+        return "team_level_selective_dag_required"
+    if FULL_LABEL in declared_workflow_labels(artifacts, required_label):
+        return "full_protocol_required"
+    if mode == "audit":
+        return "audit_required"
+    if mode == "deep":
+        return "deep_required"
+    if mode == "standard" and source_backed_scope(artifacts):
+        return "standard_source_backed_required"
+    return None
+
+
+def validate_lead_decision_policy(
+    artifacts: dict[str, Any],
+    findings: list[Finding],
+    required_label: str | None = None,
+) -> None:
+    lead_decision = artifacts.get("lead_decision")
+    run_state = artifacts.get("run_state")
+    preflight = artifacts.get("preflight")
+    required_reason = lead_decision_required_reason(artifacts, required_label)
+    if lead_decision is None:
+        if required_reason is not None:
+            code = {
+                "full_protocol_required": "FULL_PROTOCOL_REQUIRES_LEAD_DECISION",
+                "team_level_selective_dag_required": "TEAM_DAG_REQUIRES_LEAD_DECISION",
+                "audit_required": "LEAD_DECISION_REQUIRED_FOR_MODE",
+                "deep_required": "LEAD_DECISION_REQUIRED_FOR_MODE",
+                "standard_source_backed_required": "LEAD_DECISION_REQUIRED_FOR_SOURCE_BACKED_STANDARD",
+            }.get(required_reason, "LEAD_DECISION_REQUIRED")
+            findings.append(
+                Finding(
+                    "ERROR",
+                    code,
+                    (
+                        "lead_decision.json is required for standard source-backed, deep, audit, "
+                        "team-level DAG, or Full protocol workflows"
+                    ),
+                    OPTIONAL_BUNDLE_FILES["lead_decision"],
+                )
+            )
+        return
+    if not isinstance(lead_decision, dict):
+        findings.append(Finding("ERROR", "LEAD_DECISION_INVALID_SHAPE", "lead_decision must be a JSON object"))
+        return
+
+    if required_reason is not None:
+        mode_rule = str(lead_decision.get("mode_rule", "")).strip()
+        if mode_rule in {"quick_or_narrow_standard_optional", ""}:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "LEAD_DECISION_MODE_RULE_UNDERSTATES_REQUIREMENT",
+                    f"lead_decision mode_rule must reflect required route reason {required_reason}",
+                    OPTIONAL_BUNDLE_FILES["lead_decision"],
+                )
+            )
+        if lead_decision.get("lead_route_required") is not True:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "LEAD_DECISION_ROUTE_NOT_REQUIRED",
+                    "lead_decision must set lead_route_required=true for this workflow label, mode, or strategy",
+                    OPTIONAL_BUNDLE_FILES["lead_decision"],
+                )
+            )
+
+    expected_alias = requested_alias(preflight, run_state)
+    expected_mode = selected_mode(preflight, run_state)
+    expected_strategy = execution_strategy(run_state)
+    expected_run_id = str(run_state.get("run_id", "")).strip() if isinstance(run_state, dict) else ""
+    expected_decision_id = str(run_state.get("lead_decision_id", "")).strip() if isinstance(run_state, dict) else ""
+    expected_preflight_strategy = str(preflight.get("execution_strategy", "")).strip() if isinstance(preflight, dict) else ""
+
+    checks = (
+        ("requested_alias", expected_alias, "LEAD_DECISION_ALIAS_MISMATCH"),
+        ("selected_mode", expected_mode, "LEAD_DECISION_MODE_MISMATCH"),
+        ("workflow_run_id", expected_run_id, "LEAD_DECISION_RUN_ID_MISMATCH"),
+        ("decision_id", expected_decision_id, "LEAD_DECISION_ID_MISMATCH"),
+    )
+    for field, expected, code in checks:
+        value = str(lead_decision.get(field, "")).strip()
+        if expected and value and value != expected:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    code,
+                    f"lead_decision {field} {value!r} does not match expected {expected!r}",
+                    OPTIONAL_BUNDLE_FILES["lead_decision"],
+                )
+            )
+
+    value_strategy = str(lead_decision.get("execution_strategy", "")).strip()
+    if expected_strategy and value_strategy and value_strategy != expected_strategy:
+        findings.append(
+            Finding(
+                "ERROR",
+                "LEAD_DECISION_EXECUTION_STRATEGY_MISMATCH",
+                f"lead_decision execution_strategy {value_strategy!r} does not match run_state {expected_strategy!r}",
+                OPTIONAL_BUNDLE_FILES["lead_decision"],
+            )
+        )
+    if expected_preflight_strategy and value_strategy and value_strategy != expected_preflight_strategy:
+        findings.append(
+            Finding(
+                "ERROR",
+                "LEAD_DECISION_PREFLIGHT_STRATEGY_MISMATCH",
+                (
+                    f"lead_decision execution_strategy {value_strategy!r} does not match "
+                    f"preflight {expected_preflight_strategy!r}"
+                ),
+                OPTIONAL_BUNDLE_FILES["lead_decision"],
+            )
+        )
+
+    if value_strategy == TEAM_LEVEL_STRATEGY:
+        team_plan = lead_decision.get("team_spawn_plan")
+        selected_teams: list[str] = []
+        if isinstance(team_plan, dict) and isinstance(team_plan.get("selected_teams"), list):
+            selected_teams = [str(team).strip() for team in team_plan["selected_teams"] if str(team).strip()]
+        if not selected_teams:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "LEAD_DECISION_TEAM_DAG_REQUIRES_SELECTED_TEAMS",
+                    "team_level_selective_dag lead_decision must select at least one command-level team",
+                    OPTIONAL_BUNDLE_FILES["lead_decision"],
+                )
+            )
+        lane_teams = {
+            str(lane.get("team", "")).strip()
+            for lane in team_spawn_lanes(run_state)
+            if isinstance(lane, dict) and str(lane.get("team", "")).strip()
+        }
+        if lane_teams and not lane_teams.issubset(set(selected_teams)):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "LEAD_DECISION_TEAM_PLAN_MISMATCH",
+                    f"team_spawn_lanes include teams not selected by lead_decision: {sorted(lane_teams - set(selected_teams))}",
+                    OPTIONAL_BUNDLE_FILES["lead_decision"],
+                )
+            )
 
 
 def required_stage_failures(run_state: Any) -> list[dict[str, Any]]:
@@ -2005,6 +2206,7 @@ def validate_policies(
     validate_required_label(artifacts, findings, required_label)
     validate_compact_standard_artifacts(artifacts, findings, required_label)
     validate_full_protocol(artifacts, findings, required_label)
+    validate_lead_decision_policy(artifacts, findings, required_label)
     validate_spawned_instance_policy(artifacts, findings)
     validate_omics_reviewer_spawn_policy(artifacts, findings)
     validate_team_dag_policy(artifacts, findings)
@@ -2031,7 +2233,7 @@ def emit(findings: list[Finding], as_json: bool) -> None:
 
 def main() -> int:
     args = parse_args()
-    if not args.bundle and not any(getattr(args, key, None) for key in BUNDLE_FILES):
+    if not args.bundle and not any(getattr(args, key, None) for key in tuple(BUNDLE_FILES) + tuple(OPTIONAL_BUNDLE_FILES)):
         print("ERROR NO_INPUT: provide --bundle or at least one artifact path", file=sys.stderr)
         return 2
 

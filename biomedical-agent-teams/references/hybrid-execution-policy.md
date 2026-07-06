@@ -63,6 +63,8 @@ Phase 0, inline lead lock:
 - execution strategy and spawn budget
 - team dependency graph
 - central claim-ledger skeleton
+- `lead_decision.json` for standard source-backed, deep, audit, team-DAG, or
+  full-protocol routing decisions
 
 Phase 1, independent spawned team bundles when useful:
 
@@ -84,6 +86,7 @@ Phase 2, dependency-bound spawned team bundles when useful:
 Phase 3, inline synthesis:
 
 - merge accepted spawned-team outputs into the central claim ledger
+- check `lead_decision.json` against the actual team and reviewer outputs
 - keep rejected or not-verified material out of final wording
 - run claim/citation/post-write validation
 - report execution strategy, spawned outputs, skipped gates, and downgrade

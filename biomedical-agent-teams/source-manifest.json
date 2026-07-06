@@ -4,8 +4,8 @@
     "entrypoint":  "SKILL.md",
     "agent_count":  36,
     "command_count":  6,
-    "template_count":  15,
-    "contract_count":  17,
+    "template_count":  16,
+    "contract_count":  18,
     "reference_count":  10,
     "script_count":  11,
     "test_fixture_count":  12,
@@ -22,6 +22,7 @@
                            "source-corpus-lock",
                            "life-science-lead-scientist",
                            "scenario-playbook-router",
+                           "lead-decision",
                            "execution-strategy-lock",
                            "team-level-selective-dag",
                            "specialist-lanes",
@@ -96,6 +97,7 @@
                       "claim-ledger-template",
                       "hypothesis-tournament-template",
                       "integrity-gate-template",
+                      "lead-decision-template",
                       "research-overview-template",
                       "research-workbench-index-template",
                       "results-integration-template",
@@ -111,6 +113,7 @@
                       "biomedical-passport.schema",
                       "claim-ledger.schema",
                       "hypothesis-tournament.schema",
+                      "lead-decision.schema",
                       "loop-state.schema",
                       "omics-run-manifest.schema",
                       "post-write-validation.schema",
@@ -190,6 +193,7 @@
                           "bmat-export-workbench-cli",
                           "bmat-entailment-check-cli",
                           "immuno-oncology-domain-pack",
-                          "golden-eval-hard-gates-for-tool-results-artifact-and-independent-review"
+                          "golden-eval-hard-gates-for-tool-results-artifact-and-independent-review",
+                          "lead-decision-schema-template-and-full-protocol-gate"
                       ]
 }

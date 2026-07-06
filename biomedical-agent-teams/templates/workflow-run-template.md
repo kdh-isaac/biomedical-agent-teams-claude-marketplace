@@ -12,6 +12,7 @@ enough to paste into a final answer or save as a local artifact.
 | plugin_version | 1.0.0 |
 | artifacts_root |  |
 | resume_pointer |  |
+| lead_decision_id | BMAT-LEAD-YYYYMMDD-001 |
 | execution_strategy | inline_only / inline_first_selective_review / team_level_selective_dag / user_requested_full_spawn / blocked |
 | nested_spawn_allowed | false / true-with-explicit-approval |
 | final_label | Full protocol followed / Contract-shaped artifact bundle / Compact standard workflow / Biomedical Agent Teams-informed narrative review / Limited capability-downgraded workflow / Partial workflow; formal gates skipped / Blocked |
@@ -73,7 +74,8 @@ instance is not release evidence.
 | entity_normalization | context-dependent | pass / pass-with-caveats / skipped / block / not-applicable | context_lock |  | unresolved identifiers needed for source expansion |
 | source_corpus_lock | source-backed outputs | pass / pass-with-caveats / skipped / block / not-applicable | entity_normalization |  | missing source identifiers or retrieval dates |
 | selected_playbook | yes | pass / pass-with-caveats / skipped / block / not-applicable | context_lock |  | no bounded workflow route |
-| execution_strategy_lock | yes | pass / pass-with-caveats / skipped / block / not-applicable | selected_playbook |  | spawn strategy unsupported or unjustified |
+| lead_decision | standard source-backed/deep/audit/team-DAG/full-protocol | pass / pass-with-caveats / skipped / block / not-applicable | selected_playbook |  | missing or stale lead_decision.json |
+| execution_strategy_lock | yes | pass / pass-with-caveats / skipped / block / not-applicable | lead_decision |  | spawn strategy unsupported or unjustified |
 | team_spawn_outputs | selected team DAG workflows | pass / pass-with-caveats / skipped / block / not-applicable | execution_strategy_lock |  | missing formal team output or ledger handoff |
 | claim_ledger_update | standard/deep/audit | pass / pass-with-caveats / skipped / block / not-applicable | selected_playbook; team_spawn_outputs when used |  | unchecked claims before writing |
 | stage_evaluation | omics/generated-file/long-running | pass / pass-with-caveats / skipped / block / not-applicable | selected_playbook |  | validation stage blocks inference/reporting |

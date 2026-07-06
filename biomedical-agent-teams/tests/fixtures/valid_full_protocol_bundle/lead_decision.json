@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "decision_id": "lead-run-valid-001",
+  "plugin_version": "1.0.0",
+  "workflow_run_id": "run-valid-001",
+  "requested_alias": "evidence-audit-team",
+  "selected_mode": "audit",
+  "lead_agent": "life-science-lead-scientist",
+  "router_agent": "scenario-playbook-router",
+  "selected_playbook": "evidence-audit",
+  "decision_scope": "offline synthetic validator fixture",
+  "execution_strategy": "inline_first_selective_review",
+  "mode_rule": "full_protocol_required",
+  "lead_route_required": true,
+  "selected_lanes": [
+    {
+      "lane": "evidence-audit-team",
+      "purpose": "synthetic source-backed claim audit",
+      "status": "complete"
+    },
+    {
+      "lane": "citation-verifier",
+      "purpose": "tool-backed citation/source identity check",
+      "status": "complete"
+    }
+  ],
+  "skipped_lanes": [],
+  "spawned_review_plan": {
+    "allowed": true,
+    "budget": 1,
+    "selected_roles": [
+      "citation-verifier"
+    ],
+    "rationale": "tool-backed validation fixture"
+  },
+  "team_spawn_plan": {
+    "allowed": false,
+    "budget": 0,
+    "selected_teams": [],
+    "dependency_graph": [],
+    "nested_spawn_allowed": false,
+    "rationale": "single synthetic audit axis"
+  },
+  "post_team_audit_plan": "post-write validation only",
+  "label_ceiling": "Full protocol followed",
+  "routing_rationale": "Audit mode source-backed fixture requires a lead decision before full-protocol release.",
+  "decision_limitations": [
+    "synthetic offline fixture"
+  ]
+}

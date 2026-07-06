@@ -3,6 +3,7 @@
   "alias": "evidence-audit-team",
   "mode": "audit",
   "plugin_version": "1.0.0",
+  "lead_decision_id": "lead-run-valid-001",
   "execution_strategy": "inline_first_selective_review",
   "nested_spawn_allowed": false,
   "spawned_review_lanes": [
