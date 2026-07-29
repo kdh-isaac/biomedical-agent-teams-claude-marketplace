@@ -392,7 +392,6 @@ def validate_loop_policy(loop_state: Any, findings: list[Finding]) -> None:
         return
 
     status = str(loop_state.get("status", ""))
-    loop_type = str(loop_state.get("loop_type", ""))
     stop_status = str(loop_state.get("stop_status", ""))
     human_gate_status = str(loop_state.get("human_gate_status", ""))
     private_context_allowed = safe_bool_field(loop_state, "private_context_allowed", False, findings)

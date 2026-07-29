@@ -60,6 +60,7 @@
                        "default_execution_surface":  "spawned_reviewer",
                        "allowed_workflows":  [
                                                  "biomedical-research-council",
+                                                 "idea-discovery-team",
                                                  "omics-analysis-team",
                                                  "evidence-audit-team",
                                                  "translational-scout-team"

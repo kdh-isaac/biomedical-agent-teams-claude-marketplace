@@ -463,6 +463,32 @@ def test_tool_use_wording_uses_token_boundaries_for_translational_alias() -> Non
     assert module.final_text_has_tool_use_wording("We ran PubMed and checked NCBI.") is True
 
 
+def test_windows_drive_letter_ref_is_not_misdetected_as_uri_scheme(tmp_path: Path) -> None:
+    """REGRESSION: a single-letter prefix like "C:" is a Windows drive letter,
+    not a URI scheme. The scheme guard in local_artifact_ref_path() used to
+    match any "C:"-style prefix and return None before ever reaching the
+    is_absolute()/base_dir resolution below it, so on Windows every local
+    artifact reference written as an absolute path silently skipped
+    existence and outside-bundle validation.
+    """
+    module = load_validator_module()
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "final.md").write_text("final\n", encoding="utf-8")
+    artifacts = {
+        module.INTERNAL_ARTIFACT_PATHS: {"final_text": str(bundle / "final.md")}
+    }
+
+    resolved = module.local_artifact_ref_path(artifacts, "C:/bundle/review/reviewer.md")
+    assert resolved is not None
+    assert resolved.name == "reviewer.md"
+
+    # Real URI schemes (2+ characters, e.g. file:, https:, s3:) must still be
+    # treated as external references and ignored.
+    assert module.local_artifact_ref_path(artifacts, "https://example.com/reviewer.md") is None
+    assert module.local_artifact_ref_path(artifacts, "file:///bundle/reviewer.md") is None
+
+
 def test_results_integration_used_tool_requires_successful_call(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     copytree_writable(FIXTURES / "valid_full_protocol_bundle", bundle)

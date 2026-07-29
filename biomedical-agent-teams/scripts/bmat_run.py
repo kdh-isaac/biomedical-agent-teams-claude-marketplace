@@ -261,8 +261,11 @@ def main() -> int:
 
     status = 0
     if args.validate:
-        status = run_check([sys.executable, str(VALIDATOR), "--bundle", str(args.out), "--check-tool-ledger"])
-        status = status or run_check([sys.executable, str(TOOL_LEDGER_CHECK), "--bundle", str(args.out)])
+        # Run both checks unconditionally so a failing validator does not
+        # short-circuit (and silently skip) the tool-ledger check.
+        validate_status = run_check([sys.executable, str(VALIDATOR), "--bundle", str(args.out), "--check-tool-ledger"])
+        ledger_status = run_check([sys.executable, str(TOOL_LEDGER_CHECK), "--bundle", str(args.out)])
+        status = validate_status or ledger_status
     if args.dry_run:
         print("Dry run complete: scaffold artifacts only; no external tools or models were called.")
     return status

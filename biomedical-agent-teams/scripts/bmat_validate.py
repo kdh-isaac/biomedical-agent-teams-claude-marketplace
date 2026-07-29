@@ -245,7 +245,7 @@ def read_text(path: Path, key: str, findings: list[Finding]) -> str:
     return ""
 
 
-def resolve_bundle_path(bundle: Path, key: str, filename: str) -> Path:
+def resolve_bundle_path(bundle: Path, filename: str) -> Path:
     return bundle / filename
 
 
@@ -253,7 +253,7 @@ def input_paths(args: argparse.Namespace) -> dict[str, Path | None]:
     paths: dict[str, Path | None] = {}
     if args.bundle:
         for key, filename in BUNDLE_FILES.items():
-            paths[key] = resolve_bundle_path(args.bundle, key, filename)
+            paths[key] = resolve_bundle_path(args.bundle, filename)
         for key, filename in OPTIONAL_BUNDLE_FILES.items():
             candidate = args.bundle / filename
             if candidate.exists():
@@ -297,7 +297,12 @@ def artifact_base_dir(artifacts: dict[str, Any]) -> Path | None:
 
 def local_artifact_ref_path(artifacts: dict[str, Any], ref: str) -> Path | None:
     value = ref.strip()
-    if not value or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", value):
+    if not value:
+        return None
+    scheme_match = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*):", value)
+    if scheme_match and len(scheme_match.group(1)) > 1:
+        # Single-letter "schemes" (C:, D:, ...) are Windows drive letters, not
+        # URI schemes (file:, https:, s3:, ... are always 2+ characters).
         return None
     path_text = value.split("#", 1)[0].strip()
     if not path_text:
@@ -2122,16 +2127,16 @@ def validate_source_policy(artifacts: dict[str, Any], findings: list[Finding]) -
     for claim in claims:
         if not is_source_backed(claim):
             continue
-        claim_id = str(claim.get("claim_id", "unknown"))
+        claim_id_value = str(claim.get("claim_id", "unknown"))
         ids = source_ids_from_claim(claim)
         if source_corpus is None:
             findings.append(
-                Finding("ERROR", "SOURCE_BACKED_CLAIM_REQUIRES_CORPUS", f"{claim_id} is source-backed but no corpus exists")
+                Finding("ERROR", "SOURCE_BACKED_CLAIM_REQUIRES_CORPUS", f"{claim_id_value} is source-backed but no corpus exists")
             )
             continue
         if not ids:
             findings.append(
-                Finding("ERROR", "SOURCE_BACKED_CLAIM_MISSING_SOURCE", f"{claim_id} has no source_id")
+                Finding("ERROR", "SOURCE_BACKED_CLAIM_MISSING_SOURCE", f"{claim_id_value} has no source_id")
             )
             continue
         for source_id in ids:
@@ -2140,7 +2145,7 @@ def validate_source_policy(artifacts: dict[str, Any], findings: list[Finding]) -
                     Finding(
                         "ERROR",
                         "SOURCE_BACKED_CLAIM_MISSING_SOURCE",
-                        f"{claim_id} references missing or non-included source {source_id}",
+                        f"{claim_id_value} references missing or non-included source {source_id}",
                     )
                 )
 
@@ -2151,14 +2156,14 @@ def validate_final_wording(artifacts: dict[str, Any], findings: list[Finding]) -
         return
     final_norm = normalized_text(final_text)
     for claim in iter_claims(artifacts.get("claim_ledger")):
-        claim_id = str(claim.get("claim_id", "unknown"))
+        claim_id_value = str(claim.get("claim_id", "unknown"))
         allowed = str(claim.get("allowed_final_wording", "")).strip()
         audit_status = normalized_text(claim.get("audit_status", ""))
         atomic_claim = str(claim.get("atomic_claim", "")).strip()
         if audit_status in {"block", "blocked", "fail", "failed", "excluded"} and atomic_claim:
             if normalized_text(atomic_claim) in final_norm:
                 findings.append(
-                    Finding("ERROR", "BLOCKED_CLAIM_IN_FINAL_TEXT", f"{claim_id} appears in final text despite blocked status")
+                    Finding("ERROR", "BLOCKED_CLAIM_IN_FINAL_TEXT", f"{claim_id_value} appears in final text despite blocked status")
                 )
         if not allowed:
             continue
@@ -2168,7 +2173,7 @@ def validate_final_wording(artifacts: dict[str, Any], findings: list[Finding]) -
                     Finding(
                         "ERROR",
                         "FINAL_WORDING_DRIFT",
-                        f"{claim_id} is high-confidence but final text does not use allowed_final_wording",
+                        f"{claim_id_value} is high-confidence but final text does not use allowed_final_wording",
                     )
                 )
 
